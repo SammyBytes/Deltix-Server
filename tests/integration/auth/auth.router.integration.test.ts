@@ -91,6 +91,26 @@ describe('auth/auth.router (integration, real HTTP requests via Hono.fetch)', ()
     expect(res.status).toBe(401);
   });
 
+  it('POST /refresh restores a session from an explicit body refreshToken (CLI path, no cookie jar)', async () => {
+    const loginRes = await app.request('/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'alice', password: 's3cret-pass' }),
+    });
+    const { refreshToken } = (await loginRes.json()) as { refreshToken: string };
+
+    const refreshRes = await app.request('/refresh', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refreshToken }),
+    });
+
+    expect(refreshRes.status).toBe(200);
+    const body = (await refreshRes.json()) as { accessToken: string; username: string };
+    expect(body.accessToken).toBeString();
+    expect(body.username).toBe('alice');
+  });
+
   it('POST /refresh rejects a cross-origin request (CSRF defense-in-depth) with 403', async () => {
     const loginRes = await app.request('/login', {
       method: 'POST',
