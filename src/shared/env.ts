@@ -8,6 +8,11 @@
  */
 import { z } from 'zod';
 
+const localUserSchema = z.object({
+  username: z.string().min(1),
+  passwordHash: z.string().min(1),
+});
+
 const envSchema = z.object({
   // Licensing (Fase 1)
   DELTIX_LICENSE_PUBLIC_KEY: z
@@ -16,6 +21,63 @@ const envSchema = z.object({
   DELTIX_LICENSE_KEY: z.string().min(1, 'DELTIX_LICENSE_KEY is required'),
   DELTIX_DOLT_REPO_PATH: z.string().min(1, 'DELTIX_DOLT_REPO_PATH is required'),
   DELTIX_CLOCK_TOLERANCE_MS: z.coerce.number().int().nonnegative().default(5000),
+
+  // Auth / Control Plane REST (Fase 2)
+  DELTIX_JWT_PRIVATE_KEY: z
+    .string()
+    .min(1, 'DELTIX_JWT_PRIVATE_KEY is required (Ed25519 PKCS8 PEM, never hardcode it)'),
+  DELTIX_JWT_PUBLIC_KEY: z
+    .string()
+    .min(1, 'DELTIX_JWT_PUBLIC_KEY is required (Ed25519 SPKI PEM, never hardcode it)'),
+  DELTIX_LOCAL_USERS: z
+    .string()
+    .min(1, 'DELTIX_LOCAL_USERS is required (JSON array of {username, passwordHash})')
+    .transform((raw, ctx) => {
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(raw);
+      } catch {
+        ctx.addIssue({ code: 'custom', message: 'DELTIX_LOCAL_USERS must be valid JSON' });
+        return z.NEVER;
+      }
+      const result = z.array(localUserSchema).min(1).max(3).safeParse(parsed);
+      if (!result.success) {
+        ctx.addIssue({
+          code: 'custom',
+          message:
+            'DELTIX_LOCAL_USERS must be a JSON array of 1-3 {username, passwordHash} entries',
+        });
+        return z.NEVER;
+      }
+      return result.data;
+    }),
+  DELTIX_SESSION_DB_PATH: z.string().min(1, 'DELTIX_SESSION_DB_PATH is required'),
+  DELTIX_ACCESS_TOKEN_TTL_SECONDS: z.coerce.number().int().positive().default(900),
+  DELTIX_SESSION_TTL_SECONDS: z.coerce.number().int().positive().default(120),
+
+  // CORS allow-list: comma-separated list of exact origins allowed to call the
+  // REST API cross-origin (e.g. the Admin Web UI if served from a different
+  // origin/port). Empty by default — the CLI client talks server-to-server,
+  // not from a browser, so no origin needs to be allowed until the Admin Web
+  // UI requires it. NEVER default this to "*" for an authenticated API.
+  DELTIX_CORS_ALLOWED_ORIGINS: z
+    .string()
+    .default('')
+    .transform((raw) =>
+      raw
+        .split(',')
+        .map((origin) => origin.trim())
+        .filter((origin) => origin.length > 0),
+    ),
+
+  // Admin Web UI (Fase 2 follow-up): disabled by default to keep the attack
+  // surface minimal for headless/CI-driven deployments. Uses the SAME auth
+  // endpoints as the CLI — no separate auth path to secure.
+  DELTIX_ADMIN_UI_ENABLED: z.preprocess(
+    (value) =>
+      typeof value === 'string' ? ['true', '1', 'yes'].includes(value.toLowerCase()) : value,
+    z.boolean().default(false),
+  ),
 
   // Reserved for future phases
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),

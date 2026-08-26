@@ -19,6 +19,10 @@ describe('shared/env + shared/logger integration', () => {
       DELTIX_LICENSE_PUBLIC_KEY: 'test-public-key',
       DELTIX_LICENSE_KEY: 'test-license-key',
       DELTIX_DOLT_REPO_PATH: '/tmp/deltix-dolt-repo',
+      DELTIX_JWT_PRIVATE_KEY: 'test-jwt-private-key',
+      DELTIX_JWT_PUBLIC_KEY: 'test-jwt-public-key',
+      DELTIX_LOCAL_USERS: JSON.stringify([{ username: 'alice', passwordHash: 'hash' }]),
+      DELTIX_SESSION_DB_PATH: '/tmp/deltix-sessions.db',
     });
 
     expect(env.DELTIX_LICENSE_PUBLIC_KEY).toBe('test-public-key');
