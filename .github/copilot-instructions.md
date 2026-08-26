@@ -119,10 +119,12 @@ V7 Error Handling/Logging, V11 Business Logic, V13 API/Web Service, V14 Configur
 | Password storage (V2.4) | Done | argon2id via `Bun.password`, no custom KDF. |
 | Credential brute-forcing (V2.2.1) | Done | Fixed-window in-memory rate limiter; single-process assumption documented. |
 | Session expiration (V3.3) | Done | Sliding-window, not absolute TTL; verified under concurrency. |
-| Session token entropy/transport (V3.2) | Done | Random refresh token (see `session-manager.ts`), delivered only over the response body, never a cookie/URL. |
+| Session token entropy/transport (V3.2) | Done | Random refresh token (see `session-manager.ts`); returned in the response body (CLI) AND set as an `httpOnly`, `SameSite=Strict` cookie, `Secure` in production (Admin Web UI). Never placed in a URL/query string. |
 | Input validation at the boundary (V5.1) | Done | zod schemas with explicit length caps (username ≤256, password ≤1024) at the router; fuzz-tested against malformed/oversized/typed-wrong payloads. |
 | Generic error responses, no user enumeration (V7.4/V2.2) | Done | 401 body never contains the username; timing-parity dummy hash for unknown users. |
 | CORS (V14.5) | Done | Exact-origin allow-list via `DELTIX_CORS_ALLOWED_ORIGINS`, fails closed (no wildcard), verified via unit + smoke tests. |
+| CSRF (V4.2) | Done | `SameSite=Strict` cookie as the primary defense, plus a same-origin `Origin`-vs-`Host` header check as defense-in-depth on every cookie-authenticated route (`/refresh`, `/keep-alive`, `/logout`); a request with no `Origin` header (e.g. the CLI, which never cookie-authenticates) is allowed through, a mismatched `Origin` is rejected with 403. |
+| Refresh token rotation on reuse (V3.5) | **Not done (accepted trade-off)** | `/refresh` re-issues the SAME refresh token rather than rotating it. Simpler, but forgoes OWASP's "refresh token reuse detection" pattern for spotting a stolen token. Acceptable for this MVP given the short (120s) sliding session TTL; revisit if the Admin UI is exposed beyond a trusted internal network. |
 | Security response headers (V14.4) | Partial | `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy` set on the API; `Content-Security-Policy` set on the Admin Web UI only (the REST API is JSON-only, CSP is not meaningful there). |
 | Concurrency / race conditions (V11.1) | Done | Rate limiter and libSQL session store both covered by real-concurrency (`Promise.all`) integration tests. |
 | Load/stress testing (performance under sustained concurrent traffic) | **Not done** | Only correctness-under-concurrency was tested (tens of parallel requests), not sustained load/throughput benchmarking. Flag before any production capacity planning. |

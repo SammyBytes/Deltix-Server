@@ -34,6 +34,11 @@ frontend framework).
   JavaScript at any point. `secure` on the cookie is only forced in
   `NODE_ENV=production` (browsers reject `Secure` cookies over plain HTTP, and
   dev/test commonly run this server over HTTP on localhost).
+- CSRF defense-in-depth: `SameSite=Strict` already blocks the cookie from being
+  sent cross-site in modern browsers; as a second layer, `/refresh`,
+  `/keep-alive`, and `/logout` also reject any request whose `Origin` header
+  does not match the server's own `Host` (a request with no `Origin` at all —
+  e.g. the CLI, which never relies on the cookie — is still allowed).
 
 ## What it explicitly does NOT do
 

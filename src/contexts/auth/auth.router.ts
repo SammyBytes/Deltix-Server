@@ -15,6 +15,18 @@
  * cookies over plain HTTP, and this server is commonly run over HTTP on
  * localhost/private networks in dev/test. NEVER weaken this in a real
  * production deployment — it MUST be served behind TLS there.
+ *
+ * CSRF defense-in-depth: `SameSite=Strict` already blocks the cookie from
+ * being sent on cross-site navigations/requests in all modern browsers,
+ * but as a second layer (older browsers, future SameSite regressions,
+ * defense-in-depth per OWASP ASVS V4), every request that ends up
+ * authenticating via the cookie (rather than an explicit body
+ * `refreshToken`, which is what the CLI uses) must present an `Origin`
+ * header that matches this server's own `Host` header — i.e. same-origin
+ * only. A request with no `Origin` header at all (same-origin fetches
+ * sometimes omit it, and non-browser HTTP clients like the CLI never
+ * cookie-auth in the first place) is allowed through; a request with a
+ * MISMATCHED `Origin` is rejected outright.
  */
 
 import type { Context } from 'hono';
@@ -52,6 +64,30 @@ function setRefreshTokenCookie(c: Context, token: string, secure: boolean) {
   });
 }
 
+/**
+ * Returns true if this request is safe to authenticate via the
+ * cookie-derived refresh token: either it carries no `Origin` header at
+ * all (non-browser client, e.g. the CLI, or a same-origin request that
+ * omitted it), or the `Origin` it does carry matches this server's own
+ * scheme+host, per the `Host` header Hono/Bun expose for the request.
+ */
+function isSameOriginOrNoOrigin(c: Context): boolean {
+  const origin = c.req.header('origin');
+  if (!origin) {
+    return true;
+  }
+  const host = c.req.header('host');
+  if (!host) {
+    return false;
+  }
+  try {
+    const originHost = new URL(origin).host;
+    return originHost === host;
+  } catch {
+    return false;
+  }
+}
+
 export function createAuthRouter(authService: AuthService, secureCookies = true): Hono {
   const app = new Hono();
 
@@ -79,6 +115,10 @@ export function createAuthRouter(authService: AuthService, secureCookies = true)
   });
 
   app.post('/refresh', async (c) => {
+    if (!isSameOriginOrNoOrigin(c)) {
+      return c.json({ error: 'Cross-origin request rejected' }, 403);
+    }
+
     const refreshToken = getCookie(c, REFRESH_TOKEN_COOKIE);
     if (!refreshToken) {
       return c.json({ error: 'No active session' }, 401);
@@ -106,6 +146,12 @@ export function createAuthRouter(authService: AuthService, secureCookies = true)
     if (!refreshToken) {
       return c.json({ error: 'Invalid request body' }, 400);
     }
+    // Only enforce the same-origin check when we actually fell back to the
+    // cookie — an explicit body refreshToken (the CLI's path) is never
+    // cookie-driven and has no CSRF exposure to defend against here.
+    if (!parsed.data.refreshToken && !isSameOriginOrNoOrigin(c)) {
+      return c.json({ error: 'Cross-origin request rejected' }, 403);
+    }
 
     try {
       await authService.keepAlive(refreshToken);
@@ -124,6 +170,9 @@ export function createAuthRouter(authService: AuthService, secureCookies = true)
       return c.json({ error: 'Invalid request body' }, 400);
     }
     const refreshToken = parsed.data.refreshToken ?? getCookie(c, REFRESH_TOKEN_COOKIE);
+    if (!parsed.data.refreshToken && refreshToken && !isSameOriginOrNoOrigin(c)) {
+      return c.json({ error: 'Cross-origin request rejected' }, 403);
+    }
     if (refreshToken) {
       await authService.logout(refreshToken);
     }

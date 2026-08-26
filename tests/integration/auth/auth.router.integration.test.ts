@@ -91,6 +91,44 @@ describe('auth/auth.router (integration, real HTTP requests via Hono.fetch)', ()
     expect(res.status).toBe(401);
   });
 
+  it('POST /refresh rejects a cross-origin request (CSRF defense-in-depth) with 403', async () => {
+    const loginRes = await app.request('/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'alice', password: 's3cret-pass' }),
+    });
+    const setCookieHeader = loginRes.headers.get('set-cookie') ?? '';
+    const cookiePair = setCookieHeader.split(';')[0];
+
+    const res = await app.request('/refresh', {
+      method: 'POST',
+      headers: { Cookie: cookiePair, Origin: 'https://evil.example', Host: 'deltix.local' },
+    });
+
+    expect(res.status).toBe(403);
+  });
+
+  it('POST /refresh allows a same-origin request (Origin matches Host)', async () => {
+    const loginRes = await app.request('/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'alice', password: 's3cret-pass' }),
+    });
+    const setCookieHeader = loginRes.headers.get('set-cookie') ?? '';
+    const cookiePair = setCookieHeader.split(';')[0];
+
+    const res = await app.request('/refresh', {
+      method: 'POST',
+      headers: {
+        Cookie: cookiePair,
+        Origin: 'http://deltix.local',
+        Host: 'deltix.local',
+      },
+    });
+
+    expect(res.status).toBe(200);
+  });
+
   it('POST /refresh returns 401 for a revoked (logged-out) session cookie', async () => {
     const loginRes = await app.request('/login', {
       method: 'POST',
