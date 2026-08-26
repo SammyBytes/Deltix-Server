@@ -56,6 +56,7 @@ export class AuthService {
     const refreshToken = await this.sessionManager.createSession(authenticatedUsername);
 
     return {
+      username: authenticatedUsername,
       accessToken,
       refreshToken,
       expiresInSeconds: this.config.accessTokenTtlSeconds,
@@ -64,6 +65,30 @@ export class AuthService {
 
   async keepAlive(refreshToken: string): Promise<void> {
     await this.sessionManager.keepAlive(refreshToken);
+  }
+
+  /**
+   * Re-issues a fresh access token for an existing, still-active session —
+   * used by the Admin Web UI on page load/refresh to restore a session from
+   * its httpOnly refresh-token cookie without asking the user to log in
+   * again, while never exposing the refresh token itself to JavaScript.
+   */
+  async refresh(refreshToken: string): Promise<LoginResult> {
+    const username = await this.sessionManager.usernameFor(refreshToken);
+    await this.sessionManager.keepAlive(refreshToken);
+
+    const accessToken = await issueAccessToken(
+      username,
+      this.config.jwtPrivateKeyPem,
+      this.config.accessTokenTtlSeconds,
+    );
+
+    return {
+      username,
+      accessToken,
+      refreshToken,
+      expiresInSeconds: this.config.accessTokenTtlSeconds,
+    };
   }
 
   async assertSessionActive(refreshToken: string): Promise<void> {

@@ -82,4 +82,25 @@ describe('auth/auth.service (integration, real libSQL + real JWT signing)', () =
 
     expect(claims.sub).toBe('alice');
   });
+
+  it('refresh() re-issues an access token and extends the session, without requiring credentials', async () => {
+    const { refreshToken } = await service.login('alice', 's3cret-pass');
+
+    now += 100_000; // within the 120s window
+    const refreshed = await service.refresh(refreshToken);
+
+    expect(refreshed.username).toBe('alice');
+    expect(refreshed.accessToken).toBeString();
+    expect(refreshed.refreshToken).toBe(refreshToken);
+
+    const claims = await service.verifyAccessToken(refreshed.accessToken);
+    expect(claims.sub).toBe('alice');
+
+    now += 100_000; // would be expired without the refresh() call above sliding the window
+    await expect(service.assertSessionActive(refreshToken)).resolves.toBeUndefined();
+  });
+
+  it('refresh() rejects an expired or unknown session', async () => {
+    await expect(service.refresh('nonexistent-token')).rejects.toThrow();
+  });
 });

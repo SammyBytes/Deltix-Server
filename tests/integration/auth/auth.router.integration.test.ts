@@ -53,6 +53,67 @@ describe('auth/auth.router (integration, real HTTP requests via Hono.fetch)', ()
     expect(body.refreshToken).toBeString();
   });
 
+  it('POST /login sets an httpOnly, SameSite=Strict refresh-token cookie', async () => {
+    const res = await app.request('/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'alice', password: 's3cret-pass' }),
+    });
+
+    const setCookieHeader = res.headers.get('set-cookie') ?? '';
+    expect(setCookieHeader).toContain('deltix_refresh_token=');
+    expect(setCookieHeader).toContain('HttpOnly');
+    expect(setCookieHeader).toContain('SameSite=Strict');
+  });
+
+  it('POST /refresh restores a session from the cookie alone (browser reload scenario)', async () => {
+    const loginRes = await app.request('/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'alice', password: 's3cret-pass' }),
+    });
+    const setCookieHeader = loginRes.headers.get('set-cookie') ?? '';
+    const cookiePair = setCookieHeader.split(';')[0];
+
+    const refreshRes = await app.request('/refresh', {
+      method: 'POST',
+      headers: { Cookie: cookiePair },
+    });
+
+    expect(refreshRes.status).toBe(200);
+    const body = (await refreshRes.json()) as { accessToken: string; username: string };
+    expect(body.accessToken).toBeString();
+    expect(body.username).toBe('alice');
+  });
+
+  it('POST /refresh returns 401 when there is no session cookie at all', async () => {
+    const res = await app.request('/refresh', { method: 'POST' });
+    expect(res.status).toBe(401);
+  });
+
+  it('POST /refresh returns 401 for a revoked (logged-out) session cookie', async () => {
+    const loginRes = await app.request('/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'alice', password: 's3cret-pass' }),
+    });
+    const setCookieHeader = loginRes.headers.get('set-cookie') ?? '';
+    const cookiePair = setCookieHeader.split(';')[0];
+    const { refreshToken } = (await loginRes.json()) as { refreshToken: string };
+
+    await app.request('/logout', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refreshToken }),
+    });
+
+    const refreshRes = await app.request('/refresh', {
+      method: 'POST',
+      headers: { Cookie: cookiePair },
+    });
+    expect(refreshRes.status).toBe(401);
+  });
+
   it('POST /login returns 401 for invalid credentials, never leaking why', async () => {
     const res = await app.request('/login', {
       method: 'POST',
@@ -113,5 +174,29 @@ describe('auth/auth.router (integration, real HTTP requests via Hono.fetch)', ()
       body: JSON.stringify({ refreshToken }),
     });
     expect(keepAliveRes.status).toBe(401);
+  });
+
+  it('POST /logout via cookie alone (no body) revokes the session and clears the cookie', async () => {
+    const loginRes = await app.request('/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'alice', password: 's3cret-pass' }),
+    });
+    const setCookieHeader = loginRes.headers.get('set-cookie') ?? '';
+    const cookiePair = setCookieHeader.split(';')[0];
+
+    const logoutRes = await app.request('/logout', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: cookiePair },
+      body: JSON.stringify({}),
+    });
+    expect(logoutRes.status).toBe(200);
+    expect(logoutRes.headers.get('set-cookie') ?? '').toContain('Max-Age=0');
+
+    const refreshRes = await app.request('/refresh', {
+      method: 'POST',
+      headers: { Cookie: cookiePair },
+    });
+    expect(refreshRes.status).toBe(401);
   });
 });

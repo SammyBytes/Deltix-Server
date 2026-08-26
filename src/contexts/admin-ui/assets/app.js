@@ -1,9 +1,13 @@
-// Access token lives only in memory for this tab's lifetime — never
-// localStorage/sessionStorage/cookies, to minimize XSS token-theft blast
-// radius. A page reload requires logging in again; acceptable for an
-// admin console used occasionally, not the primary auth surface.
+// The access token stays in memory only, for this tab's lifetime — never
+// localStorage/sessionStorage, to minimize XSS token-theft blast radius.
+// The refresh token is NEVER read/written by this script at all: the
+// server sets it as an httpOnly, Secure, SameSite=Strict cookie on
+// login/refresh, so JavaScript can never see or exfiltrate it. On page
+// load we call POST /refresh (credentials included) to silently restore
+// an existing session from that cookie instead of forcing a fresh login
+// on every reload.
 let accessToken = null;
-let refreshToken = null;
+let currentUsername = null;
 
 const form = document.getElementById('login-form');
 const errorMessage = document.getElementById('error-message');
@@ -17,17 +21,18 @@ function showError(message) {
 }
 
 function showSession(username) {
+  currentUsername = username;
   form.classList.add('hidden');
   sessionPanel.classList.remove('hidden');
   sessionUsername.textContent = username;
 }
 
 function showForm() {
+  currentUsername = null;
+  accessToken = null;
   sessionPanel.classList.add('hidden');
   form.classList.remove('hidden');
   form.reset();
-  accessToken = null;
-  refreshToken = null;
 }
 
 form.addEventListener('submit', async (event) => {
@@ -40,6 +45,7 @@ form.addEventListener('submit', async (event) => {
   try {
     const res = await fetch('/api/v1/auth/login', {
       method: 'POST',
+      credentials: 'include',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ username, password }),
     });
@@ -51,25 +57,50 @@ form.addEventListener('submit', async (event) => {
 
     const data = await res.json();
     accessToken = data.accessToken;
-    refreshToken = data.refreshToken;
-    showSession(username);
+    showSession(data.username);
   } catch {
     showError('Could not reach the Deltix-Server.');
   }
 });
 
 logoutButton.addEventListener('click', async () => {
-  if (!refreshToken) return;
   try {
     await fetch('/api/v1/auth/logout', {
       method: 'POST',
+      credentials: 'include',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ refreshToken }),
+      body: JSON.stringify({}),
     });
   } finally {
     showForm();
   }
 });
+
+/**
+ * Runs once on every page load. Attempts to restore an existing session
+ * from the httpOnly refresh-token cookie via POST /refresh. If there is no
+ * active session (no cookie, or it expired), this silently falls through
+ * to the login form — no error is shown, since "not logged in yet" is the
+ * normal state on a first visit.
+ */
+async function restoreSessionOnLoad() {
+  try {
+    const res = await fetch('/api/v1/auth/refresh', {
+      method: 'POST',
+      credentials: 'include',
+    });
+    if (!res.ok) return;
+
+    const data = await res.json();
+    accessToken = data.accessToken;
+    showSession(data.username);
+  } catch {
+    // Server unreachable on load — just show the login form, same as any
+    // other "not logged in" case.
+  }
+}
+
+restoreSessionOnLoad();
 
 if (!localStorage.getItem('deltix-admin-tour-seen') && window.driver) {
   const driverInstance = window.driver.js.driver({
@@ -84,3 +115,4 @@ if (!localStorage.getItem('deltix-admin-tour-seen') && window.driver) {
   driverInstance.drive();
   localStorage.setItem('deltix-admin-tour-seen', 'true');
 }
+

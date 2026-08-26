@@ -132,4 +132,35 @@ describe('admin-ui boot smoke test (real subprocess, real HTTP server)', () => {
       proc.kill();
     }
   });
+
+  it('survives a "page reload": /refresh restores the session from the httpOnly cookie alone', async () => {
+    const httpPort = 33000 + Math.floor(Math.random() * 3000);
+    const proc = await spawnServer(repoPath, httpPort, { DELTIX_ADMIN_UI_ENABLED: 'true' });
+
+    try {
+      const loginRes = await fetch(`http://127.0.0.1:${httpPort}/api/v1/auth/login`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ username: 'alice', password: 's3cret-pass' }),
+      });
+      expect(loginRes.status).toBe(200);
+      const setCookieHeader = loginRes.headers.get('set-cookie') ?? '';
+      expect(setCookieHeader).toContain('deltix_refresh_token=');
+      expect(setCookieHeader).toContain('HttpOnly');
+      const cookiePair = setCookieHeader.split(';')[0];
+
+      // Simulates the browser reloading the Admin UI page: a fresh request
+      // with NO body, only the cookie the browser automatically re-sends.
+      const refreshRes = await fetch(`http://127.0.0.1:${httpPort}/api/v1/auth/refresh`, {
+        method: 'POST',
+        headers: { Cookie: cookiePair },
+      });
+      expect(refreshRes.status).toBe(200);
+      const refreshBody = await refreshRes.json();
+      expect(refreshBody.username).toBe('alice');
+      expect(refreshBody.accessToken).toBeString();
+    } finally {
+      proc.kill();
+    }
+  });
 });

@@ -37,6 +37,18 @@ export class SlidingWindowSessionManager {
     }
   }
 
+  /** Returns the username bound to an active session, or throws. */
+  async usernameFor(refreshToken: string): Promise<string> {
+    const session = await this.store.get(refreshToken);
+    if (!session) {
+      throw new SessionNotFoundError();
+    }
+    if (this.now() > session.expiresAt) {
+      throw new SessionExpiredError();
+    }
+    return session.username;
+  }
+
   /** Extends the inactivity window — called by the client's heartbeat loop. */
   async keepAlive(refreshToken: string): Promise<void> {
     await this.assertActive(refreshToken);

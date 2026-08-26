@@ -68,4 +68,21 @@ describe('auth/session-manager (sliding window, not absolute TTL)', () => {
     await manager.revoke(token);
     await expect(manager.assertActive(token)).rejects.toThrow(SessionNotFoundError);
   });
+
+  it('usernameFor returns the bound username for an active session', async () => {
+    const now = 1_000_000;
+    const manager = new SlidingWindowSessionManager(inMemoryStore(), 120, () => now);
+    const token = await manager.createSession('alice');
+
+    await expect(manager.usernameFor(token)).resolves.toBe('alice');
+  });
+
+  it('usernameFor rejects an expired session', async () => {
+    let now = 1_000_000;
+    const manager = new SlidingWindowSessionManager(inMemoryStore(), 120, () => now);
+    const token = await manager.createSession('alice');
+
+    now += 121_000;
+    await expect(manager.usernameFor(token)).rejects.toThrow(SessionExpiredError);
+  });
 });

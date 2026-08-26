@@ -10,6 +10,7 @@ export interface AccessTokenClaims {
 }
 
 export interface LoginResult {
+  username: string;
   accessToken: string;
   refreshToken: string;
   expiresInSeconds: number;

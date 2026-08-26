@@ -31,7 +31,8 @@ async function main(): Promise<void> {
 
   const env = loadEnv();
   const authService = await createAuthService(env);
-  const authRouter = createAuthRouter(authService);
+  const secureCookies = env.NODE_ENV === 'production';
+  const authRouter = createAuthRouter(authService, secureCookies);
   const app = new Hono();
   applySecurityMiddleware(app, { allowedOrigins: env.DELTIX_CORS_ALLOWED_ORIGINS });
   app.route('/api/v1/auth', authRouter);

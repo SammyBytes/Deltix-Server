@@ -98,11 +98,24 @@ describe('auth/auth.router fuzzing (integration, adversarial payloads)', () => {
     expect(res.status).toBe(400);
   });
 
-  it('POST /logout rejects a malformed refreshToken payload with 400, never 5xx', async () => {
+  it('POST /logout with no refreshToken and no session cookie is a harmless no-op (200, never 5xx)', async () => {
+    // With no refresh token in the body AND no httpOnly cookie present,
+    // there is nothing to revoke — this now mirrors "already logged out",
+    // not a malformed-request error, since /logout also reads the cookie.
     const res = await app.request('/logout', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({}),
+    });
+
+    expect(res.status).toBe(200);
+  });
+
+  it('POST /logout rejects a genuinely malformed refreshToken payload with 400, never 5xx', async () => {
+    const res = await app.request('/logout', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refreshToken: 12345 }),
     });
 
     expect(res.status).toBe(400);
