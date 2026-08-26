@@ -131,7 +131,24 @@ V7 Error Handling/Logging, V11 Business Logic, V13 API/Web Service, V14 Configur
 | Formal penetration test | **Not done** | No external pentest, no automated DAST/ZAP scan has been run against this API. Recommended before a production rollout beyond internal/trusted networks. |
 | Full line-by-line ASVS L1+L2 checklist | **Not done** | This table covers the categories judged most relevant to this module, not an exhaustive control-by-control audit. |
 
-## 5. Privacy-by-design
+### 4.2 Fase 3 ASVS review status (ephemeral transfer tickets)
+
+Reviewed against ASVS categories relevant to a short-lived credential issued on
+top of an existing session (V3 Session Management, V4 Access Control, V6 Cryptography,
+V11 Business Logic):
+
+| Area | Status | Notes |
+|---|---|---|
+| Ticket entropy (V6.3) | Done | 256-bit `crypto.randomBytes` base64url — not derived from any predictable/incremental source. |
+| Ticket scope binding (V4.1) | Done | Bound to `(username, operation, repo)` at issuance; `consumeTicket()` rejects any mismatch — a leaked ticket cannot be repurposed for a different operation or repo. |
+| Single-use enforcement (V11.1 race conditions) | Done | `activate()` is a single atomic conditional SQL `UPDATE ... WHERE status = 'issued'`; verified under real parallel load (20-25 concurrent racers against the same ticket, real libSQL file) — exactly one winner every time, no TOCTOU window. |
+| Sliding-window expiration (V3.3) | Done | Same discipline as Fase 2 sessions — no absolute TTL; `renew()` (heartbeat) is itself an atomic conditional UPDATE. |
+| Two-layer credential defense-in-depth | Done | Ticket issuance requires a valid Fase 2 JWT bearer token; a leaked ticket alone cannot authenticate as the user for anything beyond the one scoped transfer, and a leaked JWT alone cannot start a transfer without also obtaining a fresh ticket. |
+| Transport security for the ticket-authenticated channel (gRPC) | **Not yet implemented** | The gRPC wire protocol and TLS enforcement for `:50051` land in the next Fase 3 milestone; tickets today are only issued/closed over the already-TLS-agnostic-at-this-layer REST API (inherits whatever TLS termination fronts the whole server). |
+| Staging area / NAS write isolation | **Not yet implemented** | The SSD staging + async NAS sync engine (the guardrail "PROHIBIDO EL ACCESO DIRECTO AL NAS") has not been built yet — only ticket issuance/lifecycle exists so far. |
+| Orphaned ticket cleanup | Partial | `reapExpired()` exists and is unit/integration tested, but is not yet wired to a scheduled boot-time job — must be invoked periodically (or the gRPC engine can call it opportunistically) once the transfer engine itself is built. |
+
+
 
 - **Data minimization**: only log/persist what is operationally necessary. Do not log full
   license payloads, tokens, or file contents "for debugging" — log identifiers and outcomes.

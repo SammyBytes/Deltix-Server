@@ -79,6 +79,12 @@ const envSchema = z.object({
     z.boolean().default(false),
   ),
 
+  // Ephemeral transfer tickets (Fase 3: gRPC transfer engine). Reuses the
+  // same sliding-window discipline as REST auth sessions (Fase 2) — see
+  // src/contexts/transfer/ticket.service.ts.
+  DELTIX_TICKET_DB_PATH: z.string().default('./data/transfer-tickets.db'),
+  DELTIX_TICKET_TTL_SECONDS: z.coerce.number().int().positive().default(120),
+
   // Reserved for future phases
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
 });

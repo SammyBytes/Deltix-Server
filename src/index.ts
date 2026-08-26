@@ -12,6 +12,7 @@ import { Hono } from 'hono';
 import { createAdminUiRouter } from './contexts/admin-ui';
 import { createAuthRouter, createAuthService } from './contexts/auth';
 import { createLicenseValidator } from './contexts/licensing';
+import { createTicketService, createTransferRouter } from './contexts/transfer';
 import { loadEnv } from './shared/env';
 import { createLogger } from './shared/logger';
 import { applySecurityMiddleware } from './shared/security-middleware';
@@ -31,11 +32,14 @@ async function main(): Promise<void> {
 
   const env = loadEnv();
   const authService = await createAuthService(env);
+  const ticketService = await createTicketService(env);
   const secureCookies = env.NODE_ENV === 'production';
   const authRouter = createAuthRouter(authService, secureCookies);
+  const transferRouter = createTransferRouter(authService, ticketService);
   const app = new Hono();
   applySecurityMiddleware(app, { allowedOrigins: env.DELTIX_CORS_ALLOWED_ORIGINS });
   app.route('/api/v1/auth', authRouter);
+  app.route('/api/v1', transferRouter);
 
   if (env.DELTIX_ADMIN_UI_ENABLED) {
     app.route('/admin', createAdminUiRouter());
@@ -45,7 +49,8 @@ async function main(): Promise<void> {
   const httpPort = Number(Bun.env.HTTP_PORT ?? 9090);
   Bun.serve({ port: httpPort, fetch: app.fetch });
   logger.info({ port: httpPort }, 'HTTP control plane listening');
-  // gRPC transfer engine (Fase 3) and Add-on loading (Fase 4) land later.
+  // gRPC transfer engine wire protocol (Fase 3 continued) and Add-on
+  // loading (Fase 4) land later; REST ticket issuance is live now.
 }
 
 if (import.meta.main) {
