@@ -1,0 +1,64 @@
+syntax = "proto3";
+
+package deltix.transfer.v1;
+
+// Data-plane wire protocol for the Fase 3 gRPC transfer engine (:50051).
+// Complements the REST control plane (:9090): REST issues/heartbeats/closes
+// ephemeral tickets (contexts/transfer); this service is where the actual
+// repo bytes travel, authenticated by the ticket issued over REST — never
+// by the longer-lived JWT session directly.
+service TransferEngine {
+  // Client-streaming: the client sends one Header message first (carrying
+  // the ticket that authorizes this exact operation+repo), then a sequence
+  // of Chunk messages with the file bytes. The server writes everything to
+  // local SSD staging (never directly to NAS) and responds once with a
+  // PushSummary after the client half-closes the stream.
+  rpc Push(stream PushRequest) returns (PushSummary);
+
+  // Server-streaming mirror of Push, for downloading a repo. The client
+  // sends one PullRequest (with the ticket); the server streams the staged
+  // file back in Chunk messages.
+  rpc Pull(PullRequest) returns (stream Chunk);
+
+  // Sliding-window heartbeat: the client calls this roughly every 30s
+  // while a Push/Pull is in flight to keep the ticket's active window
+  // alive. Missing heartbeats past the ticket TTL causes the ticket to
+  // expire and the server to fail-closed on any further chunks for it.
+  rpc Heartbeat(HeartbeatRequest) returns (HeartbeatResponse);
+}
+
+message PushRequest {
+  oneof payload {
+    Header header = 1;
+    Chunk chunk = 2;
+  }
+}
+
+message Header {
+  string ticket_id = 1;
+  string operation = 2; // "push" or "pull" — must match the ticket's scope
+  string repo = 3;
+}
+
+message Chunk {
+  bytes data = 1;
+}
+
+message PushSummary {
+  string job_id = 1;
+  string checksum = 2; // sha256 hex of the fully-received staged file
+  int64 bytes_received = 3;
+}
+
+message PullRequest {
+  string ticket_id = 1;
+  string repo = 2;
+}
+
+message HeartbeatRequest {
+  string ticket_id = 1;
+}
+
+message HeartbeatResponse {
+  int64 new_expires_at = 1; // epoch ms, the renewed sliding-window expiry
+}

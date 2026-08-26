@@ -22,8 +22,6 @@ const keyPath = resolve(outDir, 'server.key');
 const certPath = resolve(outDir, 'server.crt');
 
 if (existsSync(keyPath) || existsSync(certPath)) {
-  console.log(`[deltix] Dev TLS cert already exists at ${outDir} — skipping generation.`);
-  console.log('[deltix] Delete the files there if you want to regenerate them.');
   process.exit(0);
 }
 
@@ -56,18 +54,5 @@ const proc = Bun.spawnSync([
 ]);
 
 if (proc.exitCode !== 0) {
-  console.error('[deltix] openssl failed to generate the dev TLS certificate:');
-  console.error(proc.stderr.toString());
   process.exit(1);
 }
-
-console.log('[deltix] Self-signed DEV-ONLY TLS certificate generated:');
-console.log(`  key:  ${keyPath}`);
-console.log(`  cert: ${certPath}`);
-console.log('');
-console.log('Set these env vars to use it with the gRPC transfer server:');
-console.log(`  DELTIX_GRPC_TLS_CERT_PATH=${certPath}`);
-console.log(`  DELTIX_GRPC_TLS_KEY_PATH=${keyPath}`);
-console.log('');
-console.log('WARNING: self-signed cert. NEVER use this in production. Clients');
-console.log('connecting to a real deployment must validate a real CA chain.');

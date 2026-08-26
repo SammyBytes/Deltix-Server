@@ -68,20 +68,6 @@ DELTIX_ADMIN_UI_ENABLED=true
 `;
 
   await Bun.write('.env', env);
-
-  console.log('Generated .env for local demo use (license + JWT keys + admin user + dolt repo).\n');
-  console.log(`Login credentials -> username: ${ADMIN_USERNAME}  password: ${ADMIN_PASSWORD}`);
-  console.log(`Dolt repo path: ${repoPath}`);
-  console.log('\nNext steps:');
-  console.log('  bun run dev');
-  console.log('  open http://127.0.0.1:9090/admin   (Admin UI)');
-  console.log(
-    '  (from Deltix-Client) DELTIX_SERVER_URL=http://127.0.0.1:9090 bun run src/cli/index.ts login admin demo1234',
-  );
-  console.log(
-    '\nWarning: Bun auto-loads .env for every `bun` invocation in this directory, including test',
-  );
-  console.log('runs — delete .env (or move it) before running `bun test` to avoid leakage.');
 }
 
 main();

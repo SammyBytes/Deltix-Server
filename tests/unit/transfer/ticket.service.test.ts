@@ -35,7 +35,7 @@ class InMemoryTicketStore implements TicketStore {
     now: number,
   ): Promise<boolean> {
     const t = this.tickets.get(ticketId);
-    if (!t || t.status !== 'issued' || t.expiresAt <= now) {
+    if (t?.status !== 'issued' || t.expiresAt <= now) {
       return false;
     }
     if (t.operation !== operation || t.repo !== repo) {
@@ -47,7 +47,7 @@ class InMemoryTicketStore implements TicketStore {
 
   async renew(ticketId: string, newExpiresAt: number, now: number): Promise<boolean> {
     const t = this.tickets.get(ticketId);
-    if (!t || t.status !== 'active' || t.expiresAt <= now) {
+    if (t?.status !== 'active' || t.expiresAt <= now) {
       return false;
     }
     t.expiresAt = newExpiresAt;
@@ -56,7 +56,7 @@ class InMemoryTicketStore implements TicketStore {
 
   async close(ticketId: string): Promise<boolean> {
     const t = this.tickets.get(ticketId);
-    if (!t || t.status !== 'active') {
+    if (t?.status !== 'active') {
       return false;
     }
     t.status = 'closed';
@@ -179,10 +179,11 @@ describe('TicketService', () => {
       await service.consumeTicket(ticket.id, 'push', 'org/repo');
 
       clock += 30_000;
-      await service.renewTicket(ticket.id);
+      const newExpiresAt = await service.renewTicket(ticket.id);
 
       const stored = await store.get(ticket.id);
       expect(stored?.expiresAt).toBe(clock + TTL_SECONDS * 1000);
+      expect(newExpiresAt).toBe(clock + TTL_SECONDS * 1000);
     });
 
     it('throws TicketNotFoundError when renewing a ticket that never went active', async () => {

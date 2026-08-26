@@ -36,14 +36,14 @@ class InMemoryTransferJobStore implements TransferJobStore {
 
   async markSynced(jobId: string): Promise<boolean> {
     const j = this.jobs.get(jobId);
-    if (!j || j.status !== 'syncing') return false;
+    if (j?.status !== 'syncing') return false;
     j.status = 'synced';
     return true;
   }
 
   async markFailed(jobId: string, error: string, nextRetryAt: number): Promise<boolean> {
     const j = this.jobs.get(jobId);
-    if (!j || j.status !== 'syncing') return false;
+    if (j?.status !== 'syncing') return false;
     j.retryCount += 1;
     j.lastError = error;
     j.nextRetryAt = nextRetryAt;
@@ -53,7 +53,7 @@ class InMemoryTransferJobStore implements TransferJobStore {
 
   async requeueDeadLetter(jobId: string): Promise<boolean> {
     const j = this.jobs.get(jobId);
-    if (!j || j.status !== 'dead_letter') return false;
+    if (j?.status !== 'dead_letter') return false;
     j.status = 'staged';
     j.retryCount = 0;
     j.lastError = null;

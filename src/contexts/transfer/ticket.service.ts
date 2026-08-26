@@ -77,17 +77,17 @@ export class TicketService {
     throw new TicketAlreadyConsumedError();
   }
 
-  /** Heartbeat: renews the sliding-window expiry of an active ticket. */
-  async renewTicket(ticketId: string): Promise<void> {
+  /** Heartbeat: renews the sliding-window expiry of an active ticket. Returns the new expiry (epoch ms). */
+  async renewTicket(ticketId: string): Promise<number> {
     const now = this.now();
     const newExpiresAt = now + this.ttlSeconds * 1000;
     const renewed = await this.store.renew(ticketId, newExpiresAt, now);
     if (renewed) {
-      return;
+      return newExpiresAt;
     }
 
     const ticket = await this.store.get(ticketId);
-    if (!ticket || ticket.status !== 'active') {
+    if (ticket?.status !== 'active') {
       throw new TicketNotFoundError();
     }
     throw new TicketExpiredError();
