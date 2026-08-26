@@ -1,0 +1,42 @@
+Business Source License 1.1
+
+Parameters:
+
+Licensor:                 Samuel Beato (Deltix Project)
+Licensed Work: deltix-server (including all core submodules and control plane source code)
+Additional Use Grant:     You may use the Licensed Work for non-production purposes, such as development, testing, and evaluation. You may also use the Licensed Work in production environments provided that the organization uses the software with no more than three (3) active concurrent users/seats. Any production deployment with four (4) or more active users/seats, or any use of Enterprise Add-ons, requires a paid commercial license from the Licensor.
+Change Date:              2030-01-01
+Change License:           Apache License, Version 2.0
+
+----------------------------------------------------------------------
+
+Premise
+
+The Licensor grants you the right to use the Licensed Work in accordance with the terms of this Business Source License 1.1 (this "License").
+
+1. Grant of License
+
+Subject to your compliance with the terms and conditions of this License, the Licensor hereby grants you a limited, non-exclusive, non-transferable, non-sublicensable, worldwide license to copy, modify, display, and distribute the Licensed Work, and to run and execute the Licensed Work solely for the purposes permitted under the Additional Use Grant specified above.
+
+2. Commercial Use and Restrictions
+
+If your use of the Licensed Work exceeds the scope permitted under the Additional Use Grant (for example, production deployments with 4 or more active users/seats or use of licensed Enterprise Add-ons), you must obtain a separate commercial license from the Licensor before engaging in such use.
+
+3. Change to Open Source License
+
+On the Change Date specified above, or four (4) years from the release date of a specific version of the Licensed Work (whichever comes first), this License will automatically terminate for that specific version, and the Licensor hereby grants you a perpetual, worldwide, non-exclusive, no-charge, royalty-free license to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of that specific version of the Licensed Work under the terms of the Change License specified above (Apache License, Version 2.0).
+
+4. Trademarks and Notices
+
+This License does not grant you any right to use the Licensor's or project's trademarks, service marks, or logos. You must retain, in all copies or modifications of the Licensed Work, all copyright, patent, trademark, and attribution notices contained in the original Licensed Work.
+
+5. Disclaimer of Warranty & Limitation of Liability
+
+THE LICENSED WORK IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, AND NONINFRINGEMENT. IN NO EVENT SHALL THE LICENSOR BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT, OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE LICENSED WORK OR THE USE OR OTHER DEALINGS IN THE LICENSED WORK.
+
+======================================================================
+For commercial licensing inquiries or deployments exceeding the 
+Additional Use Grant, please contact:
+Samuel Beato (Licensor)
+Email: deltix-licensing@proton.me
+======================================================================
