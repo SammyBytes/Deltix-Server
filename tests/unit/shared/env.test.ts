@@ -17,8 +17,7 @@ describe('shared/env', () => {
 
     expect(env.DELTIX_LICENSE_PUBLIC_KEY).toBe('test-public-key');
     expect(env.DELTIX_CLOCK_TOLERANCE_MS).toBe(5000);
-    expect(env.LOG_LEVEL).toBe('info');
-    expect(env.LOG_PRETTY).toBe(false);
+    expect(env.NODE_ENV).toBe('development');
   });
 
   it('fails fast when a required security-sensitive variable is missing', () => {
@@ -27,14 +26,12 @@ describe('shared/env', () => {
     expect(() => loadEnv(incomplete)).toThrow();
   });
 
-  it('coerces LOG_PRETTY and DELTIX_CLOCK_TOLERANCE_MS from string env values', () => {
+  it('coerces DELTIX_CLOCK_TOLERANCE_MS from a string env value', () => {
     const env = loadEnv({
       ...VALID_ENV,
-      LOG_PRETTY: 'true',
       DELTIX_CLOCK_TOLERANCE_MS: '10000',
     });
 
-    expect(env.LOG_PRETTY).toBe(true);
     expect(env.DELTIX_CLOCK_TOLERANCE_MS).toBe(10000);
   });
 });
