@@ -98,4 +98,38 @@ describe('admin-ui boot smoke test (real subprocess, real HTTP server)', () => {
       proc.kill();
     }
   });
+
+  it('serves /admin/app.js as real JavaScript and the login API works end-to-end', async () => {
+    const httpPort = 30000 + Math.floor(Math.random() * 3000);
+    const proc = await spawnServer(repoPath, httpPort, { DELTIX_ADMIN_UI_ENABLED: 'true' });
+
+    try {
+      const scriptRes = await fetch(`http://127.0.0.1:${httpPort}/admin/app.js`);
+      expect(scriptRes.status).toBe(200);
+      expect(scriptRes.headers.get('content-type')).toContain('javascript');
+
+      // Regression guard: the login page must NOT ship an inline <script>
+      // body, since the strict CSP (no 'unsafe-inline' for scripts) would
+      // silently block it and the form would fall back to a native GET
+      // submit that leaks the password into the URL query string.
+      const pageRes = await fetch(`http://127.0.0.1:${httpPort}/admin`);
+      const pageBody = await pageRes.text();
+      const scriptTagPattern = /<script\b[^>]*>([\s\S]*?)<\/script>/g;
+      for (const match of pageBody.matchAll(scriptTagPattern)) {
+        expect(match[1].trim()).toBe('');
+      }
+
+      // Prove the actual API the page's script calls works end-to-end.
+      const loginRes = await fetch(`http://127.0.0.1:${httpPort}/api/v1/auth/login`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ username: 'alice', password: 's3cret-pass' }),
+      });
+      expect(loginRes.status).toBe(200);
+      const loginBody = await loginRes.json();
+      expect(loginBody.accessToken).toBeString();
+    } finally {
+      proc.kill();
+    }
+  });
 });
