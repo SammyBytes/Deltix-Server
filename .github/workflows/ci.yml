@@ -16,6 +16,14 @@ jobs:
         with:
           bun-version: latest
 
+      - name: Install Dolt CLI
+        run: |
+          curl -Lo /tmp/dolt-install.sh https://github.com/dolthub/dolt/releases/latest/download/install.sh
+          sudo bash /tmp/dolt-install.sh
+          dolt version
+          dolt config --global --add user.name deltix-ci
+          dolt config --global --add user.email deltix-ci@example.com
+
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
