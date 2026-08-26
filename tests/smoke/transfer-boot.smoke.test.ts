@@ -10,6 +10,7 @@ import {
   generateTestKeypair,
   signLicensePayload,
 } from '../fixtures/license-fixtures';
+import { generateSelfSignedCert } from '../fixtures/tls-fixtures';
 
 const ENTRYPOINT = join(import.meta.dir, '..', '..', 'src', 'index.ts');
 
@@ -35,6 +36,8 @@ describe('transfer boot smoke test (real subprocess, real HTTP server, real tick
     const sessionDbPath = join(await mkdtemp(join(tmpdir(), 'deltix-sessions-')), 'sessions.db');
     const ticketDbPath = join(await mkdtemp(join(tmpdir(), 'deltix-tickets-')), 'tickets.db');
     httpPort = 24000 + Math.floor(Math.random() * 5000);
+    const certDir = await mkdtemp(join(tmpdir(), 'deltix-grpc-certs-transfer-'));
+    const { certPath, keyPath } = await generateSelfSignedCert(certDir);
 
     const { publicKeyBase64, privateKeyPem } = generateTestKeypair();
     const licenseKey = signLicensePayload(buildDefaultPayload(), privateKeyPem);
@@ -57,6 +60,9 @@ describe('transfer boot smoke test (real subprocess, real HTTP server, real tick
         DELTIX_SESSION_DB_PATH: sessionDbPath,
         DELTIX_TICKET_DB_PATH: ticketDbPath,
         DELTIX_TICKET_TTL_SECONDS: '120',
+        DELTIX_GRPC_TLS_CERT_PATH: certPath,
+        DELTIX_GRPC_TLS_KEY_PATH: keyPath,
+        DELTIX_GRPC_PORT: String(43000 + Math.floor(Math.random() * 10000)),
         HTTP_PORT: String(httpPort),
         LOG_PRETTY: 'false',
       },

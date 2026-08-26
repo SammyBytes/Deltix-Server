@@ -12,7 +12,12 @@ import { Hono } from 'hono';
 import { createAdminUiRouter } from './contexts/admin-ui';
 import { createAuthRouter, createAuthService } from './contexts/auth';
 import { createLicenseValidator } from './contexts/licensing';
-import { createNasSyncService, createStorageRouter, NasSyncWorker } from './contexts/storage';
+import {
+  createNasSyncService,
+  createStorageRouter,
+  NasSyncWorker,
+  startGrpcTransferEngine,
+} from './contexts/storage';
 import { createTicketService, createTransferRouter } from './contexts/transfer';
 import { loadEnv } from './shared/env';
 import { createLogger } from './shared/logger';
@@ -66,9 +71,18 @@ async function main(): Promise<void> {
     { intervalMs: env.DELTIX_NAS_SYNC_POLL_INTERVAL_MS },
     'NAS sync worker started (SSD staging -> NAS pipeline)',
   );
-  // gRPC transfer engine wire protocol (Fase 3 continued) and Add-on
-  // loading (Fase 4) land later; REST ticket issuance + staging/NAS sync
-  // are live now.
+
+  // gRPC Transfer Engine (Fase 3 continued): Push/Pull/Heartbeat wire
+  // protocol. Shares the same TransferJob store (libSQL file) as the NAS
+  // sync worker above — Push writes 'staged' rows, the worker picks them
+  // up and promotes them to the NAS pipeline.
+  const grpcEngine = await startGrpcTransferEngine(env, ticketService);
+  logger.info(
+    { port: grpcEngine.port },
+    'gRPC transfer engine listening (TLS, Push/Pull/Heartbeat)',
+  );
+  // Add-on loading (Fase 4) lands later; REST ticket issuance, gRPC
+  // transfer, and staging/NAS sync are all live now.
 }
 
 if (import.meta.main) {

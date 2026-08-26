@@ -10,6 +10,7 @@ import {
   generateTestKeypair,
   signLicensePayload,
 } from '../fixtures/license-fixtures';
+import { generateSelfSignedCert } from '../fixtures/tls-fixtures';
 
 const ENTRYPOINT = join(import.meta.dir, '..', '..', 'src', 'index.ts');
 
@@ -34,6 +35,8 @@ describe('auth boot smoke test (real subprocess, real HTTP server, real login fl
     repoPath = await initTempDoltRepo();
     sessionDbPath = join(await mkdtemp(join(tmpdir(), 'deltix-sessions-')), 'sessions.db');
     httpPort = 20000 + Math.floor(Math.random() * 10000);
+    const certDir = await mkdtemp(join(tmpdir(), 'deltix-grpc-certs-'));
+    const { certPath, keyPath } = await generateSelfSignedCert(certDir);
 
     const { publicKeyBase64, privateKeyPem } = generateTestKeypair();
     const licenseKey = signLicensePayload(buildDefaultPayload(), privateKeyPem);
@@ -54,6 +57,9 @@ describe('auth boot smoke test (real subprocess, real HTTP server, real login fl
         DELTIX_JWT_PUBLIC_KEY: jwtPublicKeyPem,
         DELTIX_LOCAL_USERS: localUsers,
         DELTIX_SESSION_DB_PATH: sessionDbPath,
+        DELTIX_GRPC_TLS_CERT_PATH: certPath,
+        DELTIX_GRPC_TLS_KEY_PATH: keyPath,
+        DELTIX_GRPC_PORT: String(20000 + Math.floor(Math.random() * 10000) + 10000),
         HTTP_PORT: String(httpPort),
         LOG_PRETTY: 'false',
       },

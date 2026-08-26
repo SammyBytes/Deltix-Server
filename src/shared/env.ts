@@ -97,6 +97,25 @@ const envSchema = z.object({
   DELTIX_NAS_SYNC_POLL_INTERVAL_MS: z.coerce.number().int().positive().default(5000),
   DELTIX_TRANSFER_JOB_MAX_RETRIES: z.coerce.number().int().positive().default(5),
 
+  // gRPC Transfer Engine (Fase 3 continued): Push/Pull/Heartbeat wire
+  // protocol. ALWAYS TLS — the server never binds a plaintext listener,
+  // so cert/key paths are required (no insecure default). Generate a
+  // local dev cert with `bun run scripts/generate-dev-tls-certs.ts`.
+  DELTIX_GRPC_PORT: z.coerce.number().int().positive().default(50051),
+  DELTIX_GRPC_TLS_CERT_PATH: z
+    .string()
+    .min(
+      1,
+      'DELTIX_GRPC_TLS_CERT_PATH is required (PEM cert chain, see scripts/generate-dev-tls-certs.ts for local dev)',
+    ),
+  DELTIX_GRPC_TLS_KEY_PATH: z
+    .string()
+    .min(
+      1,
+      'DELTIX_GRPC_TLS_KEY_PATH is required (PEM private key, see scripts/generate-dev-tls-certs.ts for local dev)',
+    ),
+  DELTIX_STAGING_ROOT_PATH: z.string().default('./data/staging'),
+
   // Reserved for future phases
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
 });

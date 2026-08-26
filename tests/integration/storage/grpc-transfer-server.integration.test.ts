@@ -11,6 +11,7 @@ import {
 import { LibsqlTransferJobStore } from '../../../src/contexts/storage/libsql-transfer-job-store';
 import { LibsqlTicketStore } from '../../../src/contexts/transfer/libsql-ticket-store';
 import { TicketService } from '../../../src/contexts/transfer/ticket.service';
+import { generateSelfSignedCert } from '../../fixtures/tls-fixtures';
 
 const PROTO_PATH = join(import.meta.dir, '..', '..', '..', 'proto', 'transfer.proto');
 
@@ -26,35 +27,6 @@ function loadClientConstructor() {
     deltix: { transfer: { v1: { TransferEngine: grpc.ServiceClientConstructor } } };
   };
   return proto.deltix.transfer.v1.TransferEngine;
-}
-
-async function generateSelfSignedCert(dir: string): Promise<{ certPath: string; keyPath: string }> {
-  const certPath = join(dir, 'server.crt');
-  const keyPath = join(dir, 'server.key');
-  const proc = Bun.spawnSync([
-    'openssl',
-    'req',
-    '-x509',
-    '-newkey',
-    'ec',
-    '-pkeyopt',
-    'ec_paramgen_curve:P-256',
-    '-nodes',
-    '-keyout',
-    keyPath,
-    '-out',
-    certPath,
-    '-days',
-    '1',
-    '-subj',
-    '/CN=localhost',
-    '-addext',
-    'subjectAltName=DNS:localhost,IP:127.0.0.1',
-  ]);
-  if (proc.exitCode !== 0) {
-    throw new Error(`openssl failed: ${proc.stderr.toString()}`);
-  }
-  return { certPath, keyPath };
 }
 
 describe('storage/grpc-transfer-server (integration, real TLS gRPC server + real client)', () => {

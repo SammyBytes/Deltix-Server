@@ -11,6 +11,7 @@ import {
   generateTestKeypair,
   signLicensePayload,
 } from '../fixtures/license-fixtures';
+import { generateSelfSignedCert } from '../fixtures/tls-fixtures';
 
 const ENTRYPOINT = join(import.meta.dir, '..', '..', 'src', 'index.ts');
 
@@ -42,6 +43,8 @@ describe('storage boot smoke test (real subprocess, real HTTP server, real stagi
     nasSimPath = await mkdtemp(join(tmpdir(), 'deltix-nas-sim-'));
     stagingDir = await mkdtemp(join(tmpdir(), 'deltix-staging-'));
     httpPort = 29000 + Math.floor(Math.random() * 5000);
+    const certDir = await mkdtemp(join(tmpdir(), 'deltix-grpc-certs-storage-'));
+    const { certPath, keyPath } = await generateSelfSignedCert(certDir);
 
     const { publicKeyBase64, privateKeyPem } = generateTestKeypair();
     const licenseKey = signLicensePayload(buildDefaultPayload(), privateKeyPem);
@@ -108,6 +111,9 @@ describe('storage boot smoke test (real subprocess, real HTTP server, real stagi
         DELTIX_NAS_SYNC_POLL_INTERVAL_MS: '200',
         DELTIX_NAS_SYNC_BACKOFF_BASE_MS: '100',
         DELTIX_NAS_SYNC_BACKOFF_MAX_MS: '500',
+        DELTIX_GRPC_TLS_CERT_PATH: certPath,
+        DELTIX_GRPC_TLS_KEY_PATH: keyPath,
+        DELTIX_GRPC_PORT: String(42000 + Math.floor(Math.random() * 10000)),
         HTTP_PORT: String(httpPort),
         LOG_PRETTY: 'false',
       },
