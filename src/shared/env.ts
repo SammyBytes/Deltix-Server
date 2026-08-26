@@ -85,6 +85,18 @@ const envSchema = z.object({
   DELTIX_TICKET_DB_PATH: z.string().default('./data/transfer-tickets.db'),
   DELTIX_TICKET_TTL_SECONDS: z.coerce.number().int().positive().default(120),
 
+  // SSD staging -> NAS sync pipeline (Fase 3 continued). No physical NAS is
+  // available yet, so DELTIX_NAS_SIM_PATH points at a local folder that is
+  // treated exactly like a real NAS mount (copy + checksum + atomic
+  // rename) — swapping in a real NAS adapter later requires no changes to
+  // NasSyncService, only a new NasAdapter implementation.
+  DELTIX_TRANSFER_JOB_DB_PATH: z.string().default('./data/transfer-jobs.db'),
+  DELTIX_NAS_SIM_PATH: z.string().default('./data/nas-sim'),
+  DELTIX_NAS_SYNC_BACKOFF_BASE_MS: z.coerce.number().int().positive().default(1000),
+  DELTIX_NAS_SYNC_BACKOFF_MAX_MS: z.coerce.number().int().positive().default(60_000),
+  DELTIX_NAS_SYNC_POLL_INTERVAL_MS: z.coerce.number().int().positive().default(5000),
+  DELTIX_TRANSFER_JOB_MAX_RETRIES: z.coerce.number().int().positive().default(5),
+
   // Reserved for future phases
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
 });

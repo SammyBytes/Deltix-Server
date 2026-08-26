@@ -1,12 +1,16 @@
 /**
- * Placeholder for the "storage" bounded context.
- *
- * This is the ONLY file other contexts/modules are allowed to import from
- * (ACL boundary). Internals of this context must never be imported directly
- * from outside (e.g. `contexts/storage/some-internal-file`).
- *
- * Implementation lands in Fase 3 of the roadmap (SSD staging -> NAS sync).
- * See README.md at the repo root and .github/copilot-instructions.md for
- * architecture rules.
+ * Public API of the "storage" bounded context (Fase 3 continued: SSD
+ * staging -> NAS sync pipeline). This is the ONLY module other
+ * contexts/modules are allowed to import from — see
+ * .github/copilot-instructions.md for the ACL boundary rule.
  */
-export {};
+export { createNasSyncService } from './create-nas-sync-service';
+export {
+  ChecksumMismatchError,
+  TransferJobInvalidTransitionError,
+  TransferJobNotFoundError,
+} from './errors';
+export { NasSyncService } from './nas-sync.service';
+export { NasSyncWorker } from './nas-sync.worker';
+export { createStorageRouter } from './storage.router';
+export type { TransferJob, TransferJobStatus } from './types';
