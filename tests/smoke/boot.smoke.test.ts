@@ -3,8 +3,10 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { $ } from 'bun';
+import { hashPassword } from '../../src/contexts/auth/password-authenticator';
 import {
   buildDefaultPayload,
+  generateTestJwtKeypairPem,
   generateTestKeypair,
   signLicensePayload,
 } from '../fixtures/license-fixtures';
@@ -36,6 +38,15 @@ describe('boot smoke test (real subprocess, real dolt repo)', () => {
   it('boots successfully (exit code 0) with a valid license and a clock in sync with dolt_log', async () => {
     const { publicKeyBase64, privateKeyPem } = generateTestKeypair();
     const licenseKey = signLicensePayload(buildDefaultPayload(), privateKeyPem);
+    const { privateKeyPem: jwtPrivateKeyPem, publicKeyPem: jwtPublicKeyPem } =
+      generateTestJwtKeypairPem();
+    const sessionDbPath = join(
+      await mkdtemp(join(tmpdir(), 'deltix-sessions-boot-smoke-')),
+      'sessions.db',
+    );
+    const localUsers = JSON.stringify([
+      { username: 'alice', passwordHash: await hashPassword('s3cret-pass') },
+    ]);
 
     const proc = Bun.spawn(['bun', 'run', ENTRYPOINT], {
       env: {
@@ -44,14 +55,26 @@ describe('boot smoke test (real subprocess, real dolt repo)', () => {
         DELTIX_LICENSE_KEY: licenseKey,
         DELTIX_DOLT_REPO_PATH: repoPath,
         DELTIX_CLOCK_TOLERANCE_MS: '5000',
+        DELTIX_JWT_PRIVATE_KEY: jwtPrivateKeyPem,
+        DELTIX_JWT_PUBLIC_KEY: jwtPublicKeyPem,
+        DELTIX_LOCAL_USERS: localUsers,
+        DELTIX_SESSION_DB_PATH: sessionDbPath,
+        HTTP_PORT: '0',
         LOG_PRETTY: 'false',
       },
       stdout: 'pipe',
       stderr: 'pipe',
     });
 
-    const exitCode = await proc.exited;
-    expect(exitCode).toBe(0);
+    // The server boots and stays alive (Bun.serve blocks the process), so we
+    // give it a moment to pass validation, then confirm it is still running
+    // instead of waiting for a natural exit that will never come.
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    const stillRunning = proc.exitCode === null;
+    proc.kill();
+    await proc.exited;
+
+    expect(stillRunning).toBe(true);
   });
 
   it('blocks boot (non-zero exit code) when the latest Dolt commit is dated in the future relative to the system clock', async () => {

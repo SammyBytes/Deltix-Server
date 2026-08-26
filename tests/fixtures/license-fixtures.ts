@@ -54,3 +54,17 @@ export function signLicensePayload(payload: TestLicensePayload, privateKeyPem: s
 
   return `${payloadBytes.toString('base64url')}.${signature.toString('base64url')}`;
 }
+
+export interface TestJwtKeypairPem {
+  privateKeyPem: string;
+  publicKeyPem: string;
+}
+
+/** Generates a fresh Ed25519 PEM keypair for signing/verifying JWTs in tests. */
+export function generateTestJwtKeypairPem(): TestJwtKeypairPem {
+  const { privateKey, publicKey } = generateKeyPairSync('ed25519');
+  return {
+    privateKeyPem: privateKey.export({ format: 'pem', type: 'pkcs8' }).toString(),
+    publicKeyPem: publicKey.export({ format: 'pem', type: 'spki' }).toString(),
+  };
+}
