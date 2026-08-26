@@ -9,10 +9,12 @@
  */
 
 import { Hono } from 'hono';
+import { createAdminUiRouter } from './contexts/admin-ui';
 import { createAuthRouter, createAuthService } from './contexts/auth';
 import { createLicenseValidator } from './contexts/licensing';
 import { loadEnv } from './shared/env';
 import { createLogger } from './shared/logger';
+import { applySecurityMiddleware } from './shared/security-middleware';
 
 const logger = createLogger('boot');
 
@@ -30,7 +32,14 @@ async function main(): Promise<void> {
   const env = loadEnv();
   const authService = await createAuthService(env);
   const authRouter = createAuthRouter(authService);
-  const app = new Hono().route('/api/v1/auth', authRouter);
+  const app = new Hono();
+  applySecurityMiddleware(app, { allowedOrigins: env.DELTIX_CORS_ALLOWED_ORIGINS });
+  app.route('/api/v1/auth', authRouter);
+
+  if (env.DELTIX_ADMIN_UI_ENABLED) {
+    app.route('/admin', createAdminUiRouter());
+    logger.info('Admin Web UI enabled at /admin');
+  }
 
   const httpPort = Number(Bun.env.HTTP_PORT ?? 9090);
   Bun.serve({ port: httpPort, fetch: app.fetch });

@@ -108,6 +108,27 @@ these categories and address them explicitly in code review:
   (OIDC/LDAP add-ons, S3 backup) must validate/allow-list its target; never forward a
   user-supplied URL verbatim to an HTTP client.
 
+### 4.1 Fase 2 ASVS review status (auth/REST control plane)
+
+Reviewed against the categories most relevant to an authentication API (ASVS L1/L2,
+sections V2 Authentication, V3 Session Management, V4 Access Control, V5 Validation,
+V7 Error Handling/Logging, V11 Business Logic, V13 API/Web Service, V14 Configuration):
+
+| Area | Status | Notes |
+|---|---|---|
+| Password storage (V2.4) | Done | argon2id via `Bun.password`, no custom KDF. |
+| Credential brute-forcing (V2.2.1) | Done | Fixed-window in-memory rate limiter; single-process assumption documented. |
+| Session expiration (V3.3) | Done | Sliding-window, not absolute TTL; verified under concurrency. |
+| Session token entropy/transport (V3.2) | Done | Random refresh token (see `session-manager.ts`), delivered only over the response body, never a cookie/URL. |
+| Input validation at the boundary (V5.1) | Done | zod schemas with explicit length caps (username ≤256, password ≤1024) at the router; fuzz-tested against malformed/oversized/typed-wrong payloads. |
+| Generic error responses, no user enumeration (V7.4/V2.2) | Done | 401 body never contains the username; timing-parity dummy hash for unknown users. |
+| CORS (V14.5) | Done | Exact-origin allow-list via `DELTIX_CORS_ALLOWED_ORIGINS`, fails closed (no wildcard), verified via unit + smoke tests. |
+| Security response headers (V14.4) | Partial | `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy` set on the API; `Content-Security-Policy` set on the Admin Web UI only (the REST API is JSON-only, CSP is not meaningful there). |
+| Concurrency / race conditions (V11.1) | Done | Rate limiter and libSQL session store both covered by real-concurrency (`Promise.all`) integration tests. |
+| Load/stress testing (performance under sustained concurrent traffic) | **Not done** | Only correctness-under-concurrency was tested (tens of parallel requests), not sustained load/throughput benchmarking. Flag before any production capacity planning. |
+| Formal penetration test | **Not done** | No external pentest, no automated DAST/ZAP scan has been run against this API. Recommended before a production rollout beyond internal/trusted networks. |
+| Full line-by-line ASVS L1+L2 checklist | **Not done** | This table covers the categories judged most relevant to this module, not an exhaustive control-by-control audit. |
+
 ## 5. Privacy-by-design
 
 - **Data minimization**: only log/persist what is operationally necessary. Do not log full

@@ -55,6 +55,30 @@ const envSchema = z.object({
   DELTIX_ACCESS_TOKEN_TTL_SECONDS: z.coerce.number().int().positive().default(900),
   DELTIX_SESSION_TTL_SECONDS: z.coerce.number().int().positive().default(120),
 
+  // CORS allow-list: comma-separated list of exact origins allowed to call the
+  // REST API cross-origin (e.g. the Admin Web UI if served from a different
+  // origin/port). Empty by default — the CLI client talks server-to-server,
+  // not from a browser, so no origin needs to be allowed until the Admin Web
+  // UI requires it. NEVER default this to "*" for an authenticated API.
+  DELTIX_CORS_ALLOWED_ORIGINS: z
+    .string()
+    .default('')
+    .transform((raw) =>
+      raw
+        .split(',')
+        .map((origin) => origin.trim())
+        .filter((origin) => origin.length > 0),
+    ),
+
+  // Admin Web UI (Fase 2 follow-up): disabled by default to keep the attack
+  // surface minimal for headless/CI-driven deployments. Uses the SAME auth
+  // endpoints as the CLI — no separate auth path to secure.
+  DELTIX_ADMIN_UI_ENABLED: z.preprocess(
+    (value) =>
+      typeof value === 'string' ? ['true', '1', 'yes'].includes(value.toLowerCase()) : value,
+    z.boolean().default(false),
+  ),
+
   // Reserved for future phases
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
 });

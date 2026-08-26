@@ -56,4 +56,16 @@ describe('shared/env', () => {
 
     expect(() => loadEnv({ ...VALID_ENV, DELTIX_LOCAL_USERS: tooMany })).toThrow();
   });
+
+  it('defaults DELTIX_ADMIN_UI_ENABLED to false when unset', () => {
+    const env = loadEnv(VALID_ENV);
+
+    expect(env.DELTIX_ADMIN_UI_ENABLED).toBe(false);
+  });
+
+  it('coerces DELTIX_ADMIN_UI_ENABLED=true from a string env value', () => {
+    const env = loadEnv({ ...VALID_ENV, DELTIX_ADMIN_UI_ENABLED: 'true' });
+
+    expect(env.DELTIX_ADMIN_UI_ENABLED).toBe(true);
+  });
 });

@@ -17,8 +17,8 @@ import {
 const logger = createLogger('http:auth');
 
 const loginBodySchema = z.object({
-  username: z.string().min(1),
-  password: z.string().min(1),
+  username: z.string().min(1).max(256),
+  password: z.string().min(1).max(1024),
 });
 
 const sessionTokenBodySchema = z.object({

@@ -61,4 +61,41 @@ describe('auth/libsql-session-store (integration, real libSQL file)', () => {
 
     expect(session?.username).toBe('bob');
   });
+
+  it('handles concurrent create() calls for distinct sessions without corrupting the file', async () => {
+    const store = new LibsqlSessionStore(dbPath);
+    await store.init();
+
+    const creations = Array.from({ length: 25 }, (_, i) =>
+      store.create(`token-concurrent-${i}`, `user-${i}`, 1_000 + i),
+    );
+    await Promise.all(creations);
+
+    const reads = await Promise.all(
+      Array.from({ length: 25 }, (_, i) => store.get(`token-concurrent-${i}`)),
+    );
+
+    for (const [i, session] of reads.entries()) {
+      expect(session?.username).toBe(`user-${i}`);
+    }
+  });
+
+  it('handles concurrent touch() calls on distinct sessions without cross-contamination', async () => {
+    const store = new LibsqlSessionStore(dbPath);
+    await store.init();
+    await Promise.all(
+      Array.from({ length: 10 }, (_, i) => store.create(`token-touch-${i}`, 'user', 0)),
+    );
+
+    await Promise.all(
+      Array.from({ length: 10 }, (_, i) => store.touch(`token-touch-${i}`, 9_000 + i)),
+    );
+
+    const reads = await Promise.all(
+      Array.from({ length: 10 }, (_, i) => store.get(`token-touch-${i}`)),
+    );
+    for (const [i, session] of reads.entries()) {
+      expect(session?.expiresAt).toBe(9_000 + i);
+    }
+  });
 });

@@ -102,4 +102,16 @@ describe('auth boot smoke test (real subprocess, real HTTP server, real login fl
     });
     expect(res.status).toBe(401);
   });
+
+  it('applies baseline security headers and fails closed on CORS for a non-allow-listed origin', async () => {
+    const res = await fetch(`http://127.0.0.1:${httpPort}/api/v1/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Origin: 'https://not-allowed.example' },
+      body: JSON.stringify({ username: 'alice', password: 'totally-wrong' }),
+    });
+
+    expect(res.headers.get('x-content-type-options')).toBe('nosniff');
+    expect(res.headers.get('x-frame-options')).toBe('DENY');
+    expect(res.headers.get('access-control-allow-origin')).toBeNull();
+  });
 });

@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="en" class="h-full bg-neutral-950">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Deltix Admin</title>
+  <meta name="robots" content="noindex, nofollow" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link
+    rel="stylesheet"
+    href="https://cdn.jsdelivr.net/npm/driver.js@1.3.1/dist/driver.css"
+  />
+</head>
+<body class="h-full flex items-center justify-center text-neutral-100">
+  <main class="w-full max-w-sm rounded-lg border border-neutral-800 bg-neutral-900 p-6 shadow-xl">
+    <h1 class="mb-1 text-lg font-semibold">Deltix Admin</h1>
+    <p class="mb-6 text-sm text-neutral-400">Sign in with your local Deltix account.</p>
+
+    <form id="login-form" class="space-y-4" data-driver="login-form">
+      <div>
+        <label for="username" class="mb-1 block text-xs font-medium text-neutral-300">Username</label>
+        <input
+          id="username"
+          name="username"
+          type="text"
+          autocomplete="username"
+          required
+          class="w-full rounded-md border border-neutral-700 bg-neutral-950 px-3 py-2 text-sm outline-none focus:border-neutral-400"
+        />
+      </div>
+      <div>
+        <label for="password" class="mb-1 block text-xs font-medium text-neutral-300">Password</label>
+        <input
+          id="password"
+          name="password"
+          type="password"
+          autocomplete="current-password"
+          required
+          class="w-full rounded-md border border-neutral-700 bg-neutral-950 px-3 py-2 text-sm outline-none focus:border-neutral-400"
+        />
+      </div>
+      <button
+        type="submit"
+        class="w-full rounded-md bg-neutral-100 px-3 py-2 text-sm font-medium text-neutral-900 hover:bg-white"
+      >
+        Sign in
+      </button>
+      <p id="error-message" class="hidden text-sm text-red-400" role="alert"></p>
+    </form>
+
+    <section id="session-panel" class="hidden" data-driver="session-panel">
+      <p class="mb-4 text-sm">
+        Signed in as <span id="session-username" class="font-semibold"></span>
+      </p>
+      <button
+        id="logout-button"
+        type="button"
+        class="w-full rounded-md border border-neutral-700 px-3 py-2 text-sm hover:bg-neutral-800"
+      >
+        Sign out
+      </button>
+    </section>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/driver.js@1.3.1/dist/driver.js.iife.js"></script>
+  <script>
+    // Access token lives only in memory for this tab's lifetime — never
+    // localStorage/sessionStorage/cookies, to minimize XSS token-theft blast
+    // radius. A page reload requires logging in again; acceptable for an
+    // admin console used occasionally, not the primary auth surface.
+    let accessToken = null;
+    let refreshToken = null;
+
+    const form = document.getElementById('login-form');
+    const errorMessage = document.getElementById('error-message');
+    const sessionPanel = document.getElementById('session-panel');
+    const sessionUsername = document.getElementById('session-username');
+    const logoutButton = document.getElementById('logout-button');
+
+    function showError(message) {
+      errorMessage.textContent = message;
+      errorMessage.classList.remove('hidden');
+    }
+
+    function showSession(username) {
+      form.classList.add('hidden');
+      sessionPanel.classList.remove('hidden');
+      sessionUsername.textContent = username;
+    }
+
+    function showForm() {
+      sessionPanel.classList.add('hidden');
+      form.classList.remove('hidden');
+      form.reset();
+      accessToken = null;
+      refreshToken = null;
+    }
+
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      errorMessage.classList.add('hidden');
+
+      const username = document.getElementById('username').value;
+      const password = document.getElementById('password').value;
+
+      try {
+        const res = await fetch('/api/v1/auth/login', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ username, password }),
+        });
+
+        if (!res.ok) {
+          showError('Invalid credentials.');
+          return;
+        }
+
+        const data = await res.json();
+        accessToken = data.accessToken;
+        refreshToken = data.refreshToken;
+        showSession(username);
+      } catch {
+        showError('Could not reach the Deltix-Server.');
+      }
+    });
+
+    logoutButton.addEventListener('click', async () => {
+      if (!refreshToken) return;
+      try {
+        await fetch('/api/v1/auth/logout', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ refreshToken }),
+        });
+      } finally {
+        showForm();
+      }
+    });
+
+    if (!localStorage.getItem('deltix-admin-tour-seen') && window.driver) {
+      const driverInstance = window.driver.js.driver({
+        showProgress: true,
+        steps: [
+          {
+            element: '#login-form',
+            popover: { title: 'Sign in', description: 'Use your local Deltix account credentials.' },
+          },
+        ],
+      });
+      driverInstance.drive();
+      localStorage.setItem('deltix-admin-tour-seen', 'true');
+    }
+  </script>
+</body>
+</html>
