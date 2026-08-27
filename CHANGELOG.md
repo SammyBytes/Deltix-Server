@@ -5,7 +5,50 @@ All notable changes to Deltix-Server are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+Each entry starts with a **plain-language summary** (what changed, in
+everyday words) before any technical detail — written so someone outside
+engineering can understand what shipped and why it matters.
+
+## [0.2.4] - 2026-08-27
+
+**In plain terms:** the Admin panel (`/admin`) was completely unstyled and
+broken on any server without internet access, because it was silently
+downloading its look-and-feel from the public internet every time someone
+opened the page. Fixed: everything it needs now ships inside the server
+itself, so the Admin panel works identically whether the server is online
+or fully offline (e.g. an internal, air-gapped machine).
+
+### Fixed
+
+- **Admin Web UI failed to render (no CSS, driver.js tour broken) on any
+  server without outbound internet access.** `login.html`/`setup.html`
+  loaded Tailwind CSS from `cdn.tailwindcss.com` and the `driver.js`
+  onboarding-tour library from `cdn.jsdelivr.net` at page-load time. On a
+  server with no route to the public internet (a common setup for
+  internal/on-prem deployments), both requests fail silently and the page
+  renders as unstyled plain HTML with a broken CSP violation in the
+  console — this is exactly what was reported. Fixed by vendoring both
+  dependencies into the repo (`src/contexts/admin-ui/assets/vendor/`) and
+  serving them from the server itself at `/admin/vendor/*`; the CSP no
+  longer needs to allow any external script/style origin at all.
+
+### Tests
+
+- Added a smoke test asserting the Admin Web UI HTML never references an
+  external CDN and that every asset it links to is actually served by the
+  Deltix-Server process itself.
+- Manually verified with a headless-browser screenshot against the login
+  page and the users/addons dashboard with all CDN hostnames DNS-blocked
+  (simulating an air-gapped VM) — renders identically to the
+  internet-connected case.
+
 ## [0.2.3] - 2026-08-27
+
+**In plain terms:** closed a narrow but real gap where taking away
+someone's write access to a repo (`deltix roles revoke`) didn't always
+stop a transfer that had already started — it now does, immediately.
+Also added a simple `/status` page so anyone can check which version is
+running on a server.
 
 ### Security
 

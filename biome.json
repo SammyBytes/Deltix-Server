@@ -3,7 +3,12 @@
   "vcs": { "enabled": true, "clientKind": "git", "useIgnoreFile": true },
   "files": {
     "ignoreUnknown": false,
-    "includes": ["**", "!**/*.html", "!src/contexts/admin-ui/assets/app.js"]
+    "includes": [
+      "**",
+      "!**/*.html",
+      "!src/contexts/admin-ui/assets/app.js",
+      "!src/contexts/admin-ui/assets/vendor/**"
+    ]
   },
   "formatter": {
     "enabled": true,

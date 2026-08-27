@@ -105,6 +105,37 @@ describe('admin-ui boot smoke test (real subprocess, real HTTP server)', () => {
     }
   });
 
+  it(
+    'never references an external CDN (must render fully on an air-gapped/no-internet ' +
+      'deployment) and serves the vendored CSS/JS assets it links to',
+    async () => {
+      const httpPort = 27500 + Math.floor(Math.random() * 500);
+      const proc = await spawnServer(repoPath, httpPort, { DELTIX_ADMIN_UI_ENABLED: 'true' });
+
+      try {
+        const res = await fetch(`http://127.0.0.1:${httpPort}/admin`);
+        const body = await res.text();
+
+        expect(body).not.toContain('cdn.tailwindcss.com');
+        expect(body).not.toContain('cdn.jsdelivr.net');
+
+        const assetHrefs = [...body.matchAll(/(?:href|src)="(\/admin\/vendor\/[^"]+)"/g)].map(
+          (m) => m[1],
+        );
+        expect(assetHrefs.length).toBeGreaterThan(0);
+
+        for (const href of assetHrefs) {
+          const assetRes = await fetch(`http://127.0.0.1:${httpPort}${href}`);
+          expect(assetRes.status).toBe(200);
+          const assetBody = await assetRes.text();
+          expect(assetBody.length).toBeGreaterThan(0);
+        }
+      } finally {
+        proc.kill();
+      }
+    },
+  );
+
   it('serves /admin/app.js as real JavaScript and the login API works end-to-end', async () => {
     const httpPort = 30000 + Math.floor(Math.random() * 3000);
     const proc = await spawnServer(repoPath, httpPort, { DELTIX_ADMIN_UI_ENABLED: 'true' });

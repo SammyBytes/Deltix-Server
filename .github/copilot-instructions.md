@@ -265,3 +265,13 @@ tickets). It is explicitly **not** used for anti-tamper (see §1.7).
 - Roadmap: (1) Cryptography & Licensing → (2) REST Control Plane & Auth (HonoJS) → (3) Ephemeral
   Tickets & gRPC Engine (:50051) → (4) Dynamic Add-on Loading → (5) Enterprise Packaging
   (Podman + single binary).
+
+## 14. CHANGELOG conventions
+
+- Every release entry starts with a short **"In plain terms:"** summary in everyday language —
+  written so someone with no engineering background can understand what changed and why it
+  matters, before any technical detail follows.
+- Keep the plain-language summary to 2-4 sentences, no jargon, no code identifiers.
+- Technical detail (root cause, affected files/endpoints, fix mechanism) still follows below it,
+  under the normal Keep a Changelog sections (`### Added`/`### Fixed`/`### Security`/etc.) — the
+  plain summary supplements the technical detail, it never replaces it.
