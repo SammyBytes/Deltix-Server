@@ -29,10 +29,10 @@
     }
   </style>
 </head>
-<body class="h-full flex items-center justify-center text-neutral-100 p-6">
+<body class="h-full flex items-center justify-center text-neutral-100 p-3 sm:p-6">
   <main
     id="app-panel"
-    class="w-full max-w-sm rounded-lg border border-neutral-800 bg-neutral-900 p-6 shadow-xl transition-[max-width] duration-300"
+    class="w-full max-w-sm rounded-lg border border-neutral-800 bg-neutral-900 p-4 shadow-xl transition-[max-width] duration-300 sm:p-6 has-[#session-panel:not(.hidden)]:max-w-2xl"
   >
     <h1 class="mb-1 text-lg font-semibold">Deltix Admin</h1>
     <p class="mb-6 text-sm text-neutral-400">Sign in with your local Deltix account.</p>
@@ -126,14 +126,14 @@
       </form>
       <p id="trust-message" class="mt-2 hidden text-sm" role="status"></p>
 
-      <div class="mt-4 overflow-hidden rounded-md border border-neutral-800">
-        <table class="w-full text-left text-xs">
+      <div class="mt-4 overflow-x-auto rounded-md border border-neutral-800">
+        <table class="w-full min-w-[480px] text-left text-xs">
           <thead>
             <tr class="border-b border-neutral-800 bg-neutral-800/60 text-neutral-400">
               <th class="px-3 py-2 font-medium">Addon</th>
               <th class="px-3 py-2 font-medium">Public key</th>
-              <th class="px-3 py-2 font-medium">Trusted</th>
-              <th class="px-3 py-2 font-medium">By</th>
+              <th class="hidden px-3 py-2 font-medium sm:table-cell">Trusted</th>
+              <th class="hidden px-3 py-2 font-medium sm:table-cell">By</th>
               <th class="px-3 py-2"></th>
             </tr>
           </thead>

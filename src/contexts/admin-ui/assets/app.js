@@ -133,11 +133,11 @@ function renderTrustedAddons(trusted) {
       keyCell.textContent = record.authorPublicKey;
 
       const trustedAtCell = document.createElement('td');
-      trustedAtCell.className = 'px-3 py-2 text-neutral-400';
+      trustedAtCell.className = 'hidden px-3 py-2 text-neutral-400 sm:table-cell';
       trustedAtCell.textContent = new Date(record.trustedAt).toLocaleString();
 
       const byCell = document.createElement('td');
-      byCell.className = 'px-3 py-2 text-neutral-400';
+      byCell.className = 'hidden px-3 py-2 text-neutral-400 sm:table-cell';
       byCell.textContent = record.trustedBy;
 
       const actionCell = document.createElement('td');
