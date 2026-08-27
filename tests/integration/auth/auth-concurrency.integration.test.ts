@@ -117,8 +117,14 @@ describe('auth concurrency (real parallel requests, no fakes for timing)', () =>
     );
 
     const results = await Promise.all(attempts);
-    const rateLimited = results.filter((r) => !r.ok && r.name === 'TooManyLoginAttemptsError');
-    const invalidCreds = results.filter((r) => !r.ok && r.name === 'InvalidCredentialsError');
+    const rateLimited = results.filter(
+      (r): r is { ok: false; name: string } =>
+        !r.ok && 'name' in r && r.name === 'TooManyLoginAttemptsError',
+    );
+    const invalidCreds = results.filter(
+      (r): r is { ok: false; name: string } =>
+        !r.ok && 'name' in r && r.name === 'InvalidCredentialsError',
+    );
     expect(invalidCreds.length).toBe(5);
     expect(rateLimited.length).toBe(15);
   });

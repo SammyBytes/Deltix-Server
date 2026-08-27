@@ -113,7 +113,11 @@ async function requireRepoRole(
 }
 
 async function authorizeRepoRequest(c: Context, authService: AuthService, minimumRole: RepoRole) {
-  return requireRepoRole(c, authService, c.req.param('repoId'), minimumRole);
+  const repoId = c.req.param('repoId');
+  if (!repoId) {
+    return c.json({ error: 'Missing repoId' }, 400);
+  }
+  return requireRepoRole(c, authService, repoId, minimumRole);
 }
 
 function parseSyncBody(parsed: z.ZodSafeParseResult<z.infer<typeof syncRequestSchema>>) {
@@ -197,10 +201,14 @@ function handleHistoryError(err: unknown, fallback: string) {
 async function respondWithRepoLog(
   c: Context,
   logService: LogService,
-  query: { branch?: string; limit?: number },
+  query: { branch?: string | undefined; limit?: number | undefined },
 ) {
+  const repoId = c.req.param('repoId');
+  if (!repoId) {
+    return c.json({ error: 'Missing repoId' }, 400);
+  }
   try {
-    const commits = await logService.list(c.req.param('repoId'), {
+    const commits = await logService.list(repoId, {
       ...(query.branch ? { branch: query.branch } : {}),
       ...(query.limit !== undefined ? { limit: query.limit } : {}),
     });
