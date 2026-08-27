@@ -11,7 +11,15 @@ import {
 import { runDoltInit } from './dolt-cli';
 import { runDoltCommit } from './dolt-commit-cli';
 import { readForeignKeyEdges } from './dolt-foreign-key-reader';
+import {
+  runDoltLatestCommitHash,
+  runDoltMerge,
+  runDoltMergeAbort,
+  runDoltCurrentBranch as runDoltMergeCurrentBranch,
+  runDoltReadConflicts,
+} from './dolt-merge-cli';
 import { LibsqlRepoStore } from './libsql-repo-store';
+import { MergeService } from './merge.service';
 import { RepoProvisioningService } from './repo-provisioning.service';
 import { SyncPreferenceService } from './sync-preference.service';
 
@@ -19,6 +27,7 @@ export interface VersioningServices {
   repoProvisioningService: RepoProvisioningService;
   commitService: CommitService;
   branchService: BranchService;
+  mergeService: MergeService;
   syncPreferenceService: SyncPreferenceService;
 }
 
@@ -38,6 +47,13 @@ export async function createVersioningServices(env: Env): Promise<VersioningServ
       runDoltCreateBranch,
       runDoltCheckoutBranch,
       runDoltDeleteBranch,
+    }),
+    mergeService: new MergeService(store, {
+      runDoltMerge,
+      runDoltMergeAbort,
+      runDoltReadConflicts,
+      runDoltLatestCommitHash,
+      runDoltCurrentBranch: runDoltMergeCurrentBranch,
     }),
     syncPreferenceService: new SyncPreferenceService(store, readForeignKeyEdges),
   };

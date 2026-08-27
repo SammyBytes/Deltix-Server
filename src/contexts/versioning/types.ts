@@ -21,3 +21,35 @@ export interface BranchSummary {
   name: string;
   isCurrent: boolean;
 }
+
+export interface MergeConflictRow {
+  fromRootIsh: string | null;
+  base: Record<string, string | null>;
+  ours: Record<string, string | null>;
+  theirs: Record<string, string | null>;
+  ourDiffType: string | null;
+  theirDiffType: string | null;
+  conflictId: string | null;
+}
+
+export interface MergeConflictTable {
+  table: string;
+  count: number;
+  conflicts: MergeConflictRow[];
+}
+
+export type MergeResult =
+  | {
+      status: 'merged';
+      targetBranch: string;
+      sourceBranch: string;
+      commitHash: string;
+      fastForward: boolean;
+      message: string;
+    }
+  | {
+      status: 'up_to_date';
+      targetBranch: string;
+      sourceBranch: string;
+      message: string;
+    };

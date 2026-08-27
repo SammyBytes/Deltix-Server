@@ -9,11 +9,13 @@ import {
   BranchNotFoundError,
   InvalidBranchNameError,
   InvalidRepoIdError,
+  MergeConflictError,
   ProtectedBranchError,
   RepoAlreadyProvisionedError,
   RepoNotFoundError,
   SyncPreferenceConflictError,
 } from './errors';
+import type { MergeService } from './merge.service';
 import type { RepoProvisioningService } from './repo-provisioning.service';
 import type { SyncPreferenceService } from './sync-preference.service';
 
@@ -25,6 +27,11 @@ const provisionRequestSchema = z.object({
 
 const branchRequestSchema = z.object({
   name: z.string().min(1).max(128),
+});
+
+const mergeRequestSchema = z.object({
+  sourceBranch: z.string().min(1).max(128),
+  targetBranch: z.string().min(1).max(128).optional(),
 });
 
 const syncRequestSchema = z.object({
@@ -89,6 +96,30 @@ function handleBranchError(err: unknown, fallback: string) {
   return { body: { error: fallback }, status: 500 };
 }
 
+function handleMergeError(err: unknown, fallback: string) {
+  if (err instanceof InvalidRepoIdError || err instanceof InvalidBranchNameError) {
+    return { body: { error: err.message }, status: 400 };
+  }
+  if (err instanceof RepoNotFoundError || err instanceof BranchNotFoundError) {
+    return { body: { error: err.message }, status: 404 };
+  }
+  if (err instanceof MergeConflictError) {
+    return {
+      body: {
+        error: err.message,
+        merge: {
+          status: 'conflicted',
+          sourceBranch: err.sourceBranch,
+          targetBranch: err.targetBranch,
+          conflicts: err.conflicts,
+        },
+      },
+      status: 409,
+    };
+  }
+  return { body: { error: fallback }, status: 500 };
+}
+
 function handleSyncError(err: unknown, fallback: string) {
   if (err instanceof InvalidRepoIdError) {
     return { body: { error: err.message }, status: 400 };
@@ -107,6 +138,7 @@ export function createVersioningRouter(
   provisioningService: RepoProvisioningService,
   syncPreferenceService?: SyncPreferenceService,
   branchService?: BranchService,
+  mergeService?: MergeService,
 ): Hono {
   const app = new Hono();
 
@@ -159,6 +191,31 @@ export function createVersioningRouter(
     }
     return c.json({ repo }, 200);
   });
+
+  if (mergeService) {
+    app.post('/repos/:repoId/merge', async (c) => {
+      const username = await requireUsername(c, authService);
+      if (typeof username !== 'string') {
+        return username;
+      }
+      const parsed = mergeRequestSchema.safeParse(await c.req.json().catch(() => null));
+      if (!parsed.success) {
+        return c.json({ error: 'Invalid request body', details: parsed.error.issues }, 400);
+      }
+      try {
+        const merge = await mergeService.merge(
+          c.req.param('repoId'),
+          parsed.data.sourceBranch,
+          parsed.data.targetBranch,
+        );
+        return c.json({ merge }, 200);
+      } catch (err) {
+        logger.error({ err, repoId: c.req.param('repoId') }, 'Failed to merge branch');
+        const handled = handleMergeError(err, 'Failed to merge branch');
+        return c.json(handled.body, handled.status as 400 | 404 | 409 | 500);
+      }
+    });
+  }
 
   if (branchService) {
     app.get('/repos/:repoId/branches', async (c) => {

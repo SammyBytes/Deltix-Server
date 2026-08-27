@@ -60,7 +60,7 @@ Contexts (all implemented through Fase 4):
 5. 🚧 Real Dolt Versioning, Admin User Management & Sync Preferences — in progress,
    see [`docs/decisions/0002-phase-5-versioning-and-user-management.md`](./docs/decisions/0002-phase-5-versioning-and-user-management.md).
    Sub-phases: 5.1 ✅ per-repo Dolt provisioning, 5.2 ✅ real commits on push, 5.3 ✅ branching,
-   5.4 merge/conflicts, 5.5 log/diff, 5.6 per-repo/branch authorization, 5.7 ✅ Admin Web UI
+   5.4 ✅ merge/conflicts, 5.5 log/diff, 5.6 per-repo/branch authorization, 5.7 ✅ Admin Web UI
    user management (libSQL-backed users, guided first-boot admin setup, create/deactivate/delete, active-session/seat analytics), 5.8 ✅ sync preferences (per-repo persistence, schema-only vs schema+data, selective
    table sync with server-side FK-closure validation and dry-run preview).
 

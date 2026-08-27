@@ -5,6 +5,7 @@ import {
   ProtectedBranchError,
   RepoNotFoundError,
 } from './errors';
+import { type RepoBranchMutex, sharedRepoBranchMutex } from './repo-branch-mutex';
 import type { RepoStore } from './repo-store';
 import type { BranchSummary } from './types';
 
@@ -20,38 +21,11 @@ interface BranchCli {
   runDoltDeleteBranch(params: { doltPath: string; branchName: string }): Promise<void>;
 }
 
-class RepoBranchMutex {
-  private readonly tails = new Map<string, Promise<void>>();
-
-  async runExclusive<T>(repoId: string, action: () => Promise<T>): Promise<T> {
-    const previous = this.tails.get(repoId) ?? Promise.resolve();
-    let release!: () => void;
-    const current = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-    this.tails.set(
-      repoId,
-      previous.then(() => current),
-    );
-    await previous;
-    try {
-      return await action();
-    } finally {
-      release();
-      if (this.tails.get(repoId) === current) {
-        this.tails.delete(repoId);
-      }
-    }
-  }
-}
-
-const sharedMutex = new RepoBranchMutex();
-
 export class BranchService {
   constructor(
     private readonly store: RepoStore,
     private readonly cli: BranchCli,
-    private readonly mutex: RepoBranchMutex = sharedMutex,
+    private readonly mutex: RepoBranchMutex = sharedRepoBranchMutex,
   ) {}
 
   async list(repoId: string): Promise<BranchSummary[]> {

@@ -48,8 +48,13 @@ async function main(): Promise<void> {
   const ticketService = await createTicketService(env);
   const nasSyncService = await createNasSyncService(env);
   const addonTrustStore = await createAddonTrustStore(env);
-  const { repoProvisioningService, commitService, branchService, syncPreferenceService } =
-    await createVersioningServices(env);
+  const {
+    repoProvisioningService,
+    commitService,
+    branchService,
+    mergeService,
+    syncPreferenceService,
+  } = await createVersioningServices(env);
   const secureCookies = env.NODE_ENV === 'production';
   const authRouter = createAuthRouter(authService, secureCookies);
   const transferRouter = createTransferRouter(authService, ticketService);
@@ -60,6 +65,7 @@ async function main(): Promise<void> {
     repoProvisioningService,
     syncPreferenceService,
     branchService,
+    mergeService,
   );
   const app = new Hono();
   applySecurityMiddleware(app, { allowedOrigins: env.DELTIX_CORS_ALLOWED_ORIGINS });

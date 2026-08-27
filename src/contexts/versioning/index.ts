@@ -21,11 +21,20 @@ export { runDoltInit } from './dolt-cli';
 export { runDoltCommit } from './dolt-commit-cli';
 export { assertSafeTableName, readForeignKeyEdges } from './dolt-foreign-key-reader';
 export {
+  runDoltCheckoutBranch as runDoltMergeCheckoutBranch,
+  runDoltCurrentBranch as runDoltMergeCurrentBranch,
+  runDoltLatestCommitHash,
+  runDoltMerge,
+  runDoltMergeAbort,
+  runDoltReadConflicts,
+} from './dolt-merge-cli';
+export {
   BranchAlreadyExistsError,
   BranchNotFoundError,
   CommitFailedError,
   InvalidBranchNameError,
   InvalidRepoIdError,
+  MergeConflictError,
   ProtectedBranchError,
   RepoAlreadyProvisionedError,
   RepoNotFoundError,
@@ -33,6 +42,8 @@ export {
   SyncPreferenceConflictError,
 } from './errors';
 export { LibsqlRepoStore } from './libsql-repo-store';
+export { MergeService } from './merge.service';
+export { RepoBranchMutex, sharedRepoBranchMutex } from './repo-branch-mutex';
 export type { RunDoltInit } from './repo-provisioning.service';
 export { RepoProvisioningService } from './repo-provisioning.service';
 export type { RepoStore } from './repo-store';
@@ -46,5 +57,12 @@ export type {
   SyncPlan,
   SyncPlanRequest,
 } from './sync-preference-types';
-export type { BranchSummary, RepoRecord, RepoSyncPreferenceSummary } from './types';
+export type {
+  BranchSummary,
+  MergeConflictRow,
+  MergeConflictTable,
+  MergeResult,
+  RepoRecord,
+  RepoSyncPreferenceSummary,
+} from './types';
 export { createVersioningRouter } from './versioning.router';

@@ -72,3 +72,34 @@ export class ProtectedBranchError extends Error {
     this.name = 'ProtectedBranchError';
   }
 }
+
+export class MergeConflictError extends Error {
+  constructor(
+    message: string,
+    public readonly conflicts: Array<{
+      table: string;
+      count: number;
+      conflicts: Array<{
+        fromRootIsh: string | null;
+        base: Record<string, string | null>;
+        ours: Record<string, string | null>;
+        theirs: Record<string, string | null>;
+        ourDiffType: string | null;
+        theirDiffType: string | null;
+        conflictId: string | null;
+      }>;
+    }>,
+    public readonly branches: { sourceBranch: string; targetBranch: string },
+  ) {
+    super(message);
+    this.name = 'MergeConflictError';
+  }
+
+  get sourceBranch(): string {
+    return this.branches.sourceBranch;
+  }
+
+  get targetBranch(): string {
+    return this.branches.targetBranch;
+  }
+}

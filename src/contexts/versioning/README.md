@@ -114,6 +114,42 @@ from `src/index.ts`) so `versioning` can revalidate any ticket override
 before a transfer job is committed, without breaking the cross-context ACL
 boundary.
 
+## Fase 5.4 — merge y conflictos
+
+`MergeService` exposes real `dolt merge` operations on provisioned repos,
+backed by `dolt-merge-cli.ts`:
+
+- `runDoltMerge()` shells out to `dolt merge <sourceBranch>` and optionally
+  checks out an explicit target branch first.
+- `runDoltReadConflicts()` reads `dolt_conflicts` plus each
+  `dolt_conflicts_<table>` system table and translates raw SQL rows into
+  structured JSON.
+- `runDoltMergeAbort()` fail-closes conflicted merges by aborting them after
+  conflict capture so the repo working tree returns to a clean state.
+- `runDoltLatestCommitHash()` reads the post-merge commit hash from
+  `dolt_log`.
+
+Conflict payload shape:
+
+- per table: `{ table, count, conflicts }`
+- per conflict row:
+  `{ fromRootIsh, base, ours, theirs, ourDiffType, theirDiffType, conflictId }`
+
+REST API surface:
+
+- `POST /api/v1/versioning/repos/:repoId/merge`
+  with body `{ sourceBranch: string, targetBranch?: string }`
+
+Response outcomes:
+
+- `200 { merge: { status: 'merged', commitHash, fastForward, ... } }`
+- `200 { merge: { status: 'up_to_date', ... } }`
+- `409 { error, merge: { status: 'conflicted', conflicts: [...] } }`
+
+Merge operations share the exact same per-repo in-memory mutex as branching
+via `repo-branch-mutex.ts`, so checkout/create/delete/merge cannot
+interleave on the same real Dolt working directory.
+
 ## Not yet implemented
 
 - merge/conflicts, log/diff, and per-repo/branch authorization — see the

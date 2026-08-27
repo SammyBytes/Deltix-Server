@@ -1,12 +1,15 @@
-import { beforeEach, describe, expect, it, mock } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
 import { generateKeyPairSync } from 'node:crypto';
-import { rm } from 'node:fs/promises';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { AuthService } from '../../../src/contexts/auth/auth.service';
 import { LibsqlSessionStore } from '../../../src/contexts/auth/libsql-session-store';
 import { LibsqlUserStore } from '../../../src/contexts/auth/libsql-user-store';
 import { hashPassword } from '../../../src/contexts/auth/password-authenticator';
 import { BranchService } from '../../../src/contexts/versioning/branch.service';
 import { LibsqlRepoStore } from '../../../src/contexts/versioning/libsql-repo-store';
+import { MergeService } from '../../../src/contexts/versioning/merge.service';
 import { RepoProvisioningService } from '../../../src/contexts/versioning/repo-provisioning.service';
 import { SyncPreferenceService } from '../../../src/contexts/versioning/sync-preference.service';
 import { createVersioningRouter } from '../../../src/contexts/versioning/versioning.router';
@@ -20,19 +23,19 @@ function generateTestEd25519KeyPairPem() {
 }
 
 describe('versioning/versioning.router (integration, real HTTP requests via Hono.fetch)', () => {
-  const sessionDbPath = `/tmp/deltix-versioning-router-sessions-${Date.now()}.db`;
-  const repoDbPath = `/tmp/deltix-versioning-router-repos-${Date.now()}.db`;
+  let tempDir: string;
   let app: ReturnType<typeof createVersioningRouter>;
   let authService: AuthService;
 
   beforeEach(async () => {
-    await rm(sessionDbPath, { force: true });
-    await rm(sessionDbPath.replace('sessions', 'users'), { force: true });
-    await rm(repoDbPath, { force: true });
+    tempDir = await mkdtemp(join(tmpdir(), 'deltix-versioning-router-'));
+    const sessionDbPath = join(tempDir, 'sessions.db');
+    const userDbPath = join(tempDir, 'users.db');
+    const repoDbPath = join(tempDir, 'repos.db');
 
     const sessionStore = new LibsqlSessionStore(sessionDbPath);
     await sessionStore.init();
-    const userStore = new LibsqlUserStore(sessionDbPath.replace('sessions', 'users'));
+    const userStore = new LibsqlUserStore(userDbPath);
     await userStore.init();
     await userStore.create({
       username: 'alice',
@@ -84,13 +87,51 @@ describe('versioning/versioning.router (integration, real HTTP requests via Hono
       runDoltCheckoutBranch: mock(async () => {}),
       runDoltDeleteBranch: mock(async () => {}),
     });
+    const mergeService = new MergeService(repoStore, {
+      runDoltMerge: mock(async ({ sourceBranch, targetBranch }) => ({
+        exitCode: sourceBranch === 'feature/conflict' ? 1 : 0,
+        stdout:
+          sourceBranch === 'feature/conflict'
+            ? 'CONFLICT (content): Merge conflict in items'
+            : sourceBranch === 'feature/up-to-date'
+              ? 'Already up to date.'
+              : 'Fast-forward',
+        stderr: '',
+        currentBranch: targetBranch ?? 'main',
+      })),
+      runDoltMergeAbort: mock(async () => {}),
+      runDoltReadConflicts: mock(async () => [
+        {
+          table: 'items',
+          count: 1,
+          conflicts: [
+            {
+              fromRootIsh: 'root',
+              base: { id: '1', value: 'base' },
+              ours: { id: '1', value: 'ours' },
+              theirs: { id: '1', value: 'theirs' },
+              ourDiffType: 'modified',
+              theirDiffType: 'modified',
+              conflictId: 'conflict-1',
+            },
+          ],
+        },
+      ]),
+      runDoltLatestCommitHash: mock(async () => 'merge-hash-123'),
+      runDoltCurrentBranch: mock(async () => 'main'),
+    });
 
     app = createVersioningRouter(
       authService,
       provisioningService,
       syncPreferenceService,
       branchService,
+      mergeService,
     );
+  });
+
+  afterEach(async () => {
+    await rm(tempDir, { recursive: true, force: true });
   });
 
   async function loginAndGetAccessToken(): Promise<string> {
@@ -118,7 +159,7 @@ describe('versioning/versioning.router (integration, real HTTP requests via Hono
       });
 
       expect(res.status).toBe(201);
-      const body = await res.json();
+      const body = (await res.json()) as { repo: { repoId: string; createdBy: string } };
       expect(body.repo.repoId).toBe('demo-repo');
       expect(body.repo.createdBy).toBe('alice');
     });
@@ -172,7 +213,7 @@ describe('versioning/versioning.router (integration, real HTTP requests via Hono
       });
 
       expect(res.status).toBe(200);
-      const body = await res.json();
+      const body = (await res.json()) as { repos: Array<{ repoId: string }> };
       expect(body.repos).toHaveLength(1);
     });
   });
@@ -201,7 +242,7 @@ describe('versioning/versioning.router (integration, real HTTP requests via Hono
       });
 
       expect(res.status).toBe(200);
-      const body = await res.json();
+      const body = (await res.json()) as { repo: { repoId: string } };
       expect(body.repo.repoId).toBe('demo-repo');
     });
   });
@@ -220,7 +261,7 @@ describe('versioning/versioning.router (integration, real HTTP requests via Hono
       });
 
       expect(res.status).toBe(200);
-      const body = await res.json();
+      const body = (await res.json()) as { preference: null };
       expect(body.preference).toBeNull();
     });
 
@@ -239,7 +280,9 @@ describe('versioning/versioning.router (integration, real HTTP requests via Hono
       });
 
       expect(res.status).toBe(200);
-      const body = await res.json();
+      const body = (await res.json()) as {
+        preference: { mode: string; requestedTables: string[] | null };
+      };
       expect(body.preference.mode).toBe('schema_only');
       expect(body.preference.requestedTables).toEqual(['customers', 'orders']);
     });
@@ -276,7 +319,7 @@ describe('versioning/versioning.router (integration, real HTTP requests via Hono
       });
 
       expect(res.status).toBe(409);
-      const body = await res.json();
+      const body = (await res.json()) as { error: string };
       expect(body.error).toContain('FK dependencies');
     });
   });
@@ -295,7 +338,7 @@ describe('versioning/versioning.router (integration, real HTTP requests via Hono
       });
 
       expect(res.status).toBe(200);
-      const body = await res.json();
+      const body = (await res.json()) as { branches: Array<{ name: string; isCurrent: boolean }> };
       expect(body.branches).toHaveLength(2);
     });
 
@@ -329,7 +372,7 @@ describe('versioning/versioning.router (integration, real HTTP requests via Hono
       });
 
       expect(res.status).toBe(200);
-      const body = await res.json();
+      const body = (await res.json()) as { branch: { name: string } };
       expect(body.branch.name).toBe('main');
     });
 
@@ -363,6 +406,52 @@ describe('versioning/versioning.router (integration, real HTTP requests via Hono
       });
 
       expect(res.status).toBe(204);
+    });
+  });
+
+  describe('merge endpoint', () => {
+    it('merges a source branch into the current branch', async () => {
+      const token = await loginAndGetAccessToken();
+      await app.request('/repos', {
+        method: 'POST',
+        headers: { authorization: ['Bearer ', token].join(''), 'content-type': 'application/json' },
+        body: JSON.stringify({ repoId: 'demo-repo' }),
+      });
+
+      const res = await app.request('/repos/demo-repo/merge', {
+        method: 'POST',
+        headers: { authorization: ['Bearer ', token].join(''), 'content-type': 'application/json' },
+        body: JSON.stringify({ sourceBranch: 'feature/demo' }),
+      });
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { merge: { status: string; commitHash: string } };
+      expect(body.merge.status).toBe('merged');
+      expect(body.merge.commitHash).toBe('merge-hash-123');
+    });
+
+    it('returns a structured 409 payload when Dolt reports conflicts', async () => {
+      const token = await loginAndGetAccessToken();
+      await app.request('/repos', {
+        method: 'POST',
+        headers: { authorization: ['Bearer ', token].join(''), 'content-type': 'application/json' },
+        body: JSON.stringify({ repoId: 'demo-repo' }),
+      });
+
+      const res = await app.request('/repos/demo-repo/merge', {
+        method: 'POST',
+        headers: { authorization: ['Bearer ', token].join(''), 'content-type': 'application/json' },
+        body: JSON.stringify({ sourceBranch: 'feature/conflict' }),
+      });
+
+      expect(res.status).toBe(409);
+      const body = (await res.json()) as {
+        error: string;
+        merge: { status: string; conflicts: Array<{ table: string }> };
+      };
+      expect(body.error).toContain('Merge conflict');
+      expect(body.merge.status).toBe('conflicted');
+      expect(body.merge.conflicts[0]?.table).toBe('items');
     });
   });
 });

@@ -94,6 +94,43 @@ modelo de usuarios ya existe de verdad)**.
 
 ---
 
+## 3.2. Sub-fase 5.4 — Merge y conflictos (detalle)
+
+### Problema actual
+- Fase 5.3 ya permite crear/cambiar/borrar ramas reales, pero todavía no existe una operación server-side para reconciliar dos líneas de trabajo sobre el mismo repo Dolt.
+- Un `dolt merge` con conflictos deja el repo en estado "merge in progress"; en un servidor que comparte un único working directory real por `repoId`, dejar ese estado colgando entre requests vuelve impredecibles las siguientes operaciones concurrentes (commit, checkout, otro merge, push).
+- El output humano del CLI no sirve como contrato API estable: el consumidor necesita JSON estructurado, no texto crudo con `CONFLICT (content): ...`.
+
+### Alcance propuesto
+1. **Merge real sobre el working directory provisionado**:
+   - Exponer `POST /api/v1/versioning/repos/:repoId/merge` con body `{ sourceBranch, targetBranch? }`.
+   - Si `targetBranch` no viene, el merge ocurre sobre la rama actualmente checked out.
+   - Si `targetBranch` viene, el server hace checkout real de esa rama antes del merge y el resultado queda persistido en ese working directory.
+2. **Validación defensiva**:
+   - `sourceBranch` y `targetBranch` reutilizan exactamente la misma convención allow-list de 5.3 (`VALID_BRANCH`) y las mismas exclusiones de whitespace, `..`, y `/` en extremos.
+   - `dolt_conflicts_<table>` se consulta solo después de validar el nombre de tabla contra un regex conservador (`^[A-Za-z_][A-Za-z0-9_]*$`) antes de interpolarlo en `dolt sql -q`.
+3. **Traducción de conflictos a JSON estructurado**:
+   - Primero se lee `SELECT table, num_conflicts FROM dolt_conflicts`.
+   - Luego, por cada tabla, se lee `SELECT * FROM dolt_conflicts_<table>` y se traduce a:
+     - `{ table, count, conflicts }`
+     - Cada conflicto contiene `{ fromRootIsh, base, ours, theirs, ourDiffType, theirDiffType, conflictId }`
+   - `base` / `ours` / `theirs` son mapas columna→valor, para no hardcodear schemas de negocio en el servidor.
+4. **Outcomes explícitos**:
+   - Merge limpio / fast-forward: `status: 'merged'` + `commitHash` leído desde `dolt_log`.
+   - Already up-to-date: `status: 'up_to_date'`, distinguible de un merge real.
+   - Conflicto: `409` con payload estructurado y sin exponer solo texto crudo del CLI.
+   - Rama inexistente: `BranchNotFoundError` traducido a `404`.
+
+### Decisiones de diseño resueltas
+- **Auto-abort al detectar conflictos**: se eligió capturar `dolt_conflicts*` y luego ejecutar inmediatamente `dolt merge --abort`. Razón: el servidor opera sobre un working directory compartido por repo; dejar merges a medio resolver entre requests haría que la siguiente operación herede estado implícito y no determinista. El contrato queda fail-closed: la API reporta el conflicto completo, pero el repo vuelve a un estado limpio y conocido antes de liberar el mutex.
+- **Mutex compartido con branching**: `BranchService` y `MergeService` importan la misma instancia `sharedRepoBranchMutex` desde un módulo nuevo `repo-branch-mutex.ts`. Duplicar mutexes separados hubiera sido incorrecto: dos locks distintos en memoria no protegen el mismo repo físico y permitirían interleavings peligrosos (`checkout` mientras otro request mergea).
+- **Shape del JSON de conflictos**: se resolvió no aplanar a strings ni modelar columnas fijas por tabla. Usar mapas `base/ours/theirs` hace que la API siga siendo legible pero también agnóstica al schema del repo versionado; eso evita acoplar el contexto `versioning` a tablas de negocio futuras.
+- **Modelado de "up to date"**: se modela como discriminated union de retorno (`MergeResult`) y no como excepción. No es un error de dominio; es un no-op explícito que el cliente/API debe poder distinguir de `merged` sin depender del texto del CLI.
+
+### Implicaciones / límites conocidos
+- La serialización sigue siendo **in-process**. Es correcta para la topología actual de un único proceso Bun; múltiples instancias sobre el mismo repo físico requerirían un lock distribuido o de filesystem.
+- El cliente CLI (`Deltix-Client`) permanece fuera de alcance en 5.4; esta sub-fase habilita solo la superficie REST server-side.
+
 ## 3. Sub-fase 5.7 — Gestión de usuarios en Admin UI (detalle)
 
 ### Problema actual
@@ -245,7 +282,7 @@ modelo de usuarios ya existe de verdad)**.
 | 5.1 | ✅ Completa — `contexts/versioning` (RepoProvisioningService + LibsqlRepoStore + `dolt init` real vía Bun.$ + router JWT-autenticado `/api/v1/versioning/repos`); 25 tests (unit+integration+smoke) en verde |
 | 5.2 | ✅ Completa — `CommitService` + `runDoltCommit` real (upsert en `deltix_push_log` + `dolt add -A && dolt commit --author`), invocado best-effort tras `PushSessionHandler.finish()` vía hook inyectado (`OnPushCommitted`, ACL storage→versioning); repos sin provisionar via 5.1 quedan como no-op retrocompatible. Client `commit_id` visible queda para una iteración posterior. 34 tests nuevos (unit+integration+smoke) en verde |
 | 5.3 | ✅ Completa — `BranchService` + `dolt-branch-cli` exponen create/list/current/checkout/delete reales sobre repos provisionados, con validación defensiva de nombres, protección de `main`, rechazo de borrar la rama activa y endpoints JWT `/api/v1/versioning/repos/:repoId/branches*`; operaciones mutantes serializadas por repo con mutex in-process. |
-| 5.4 | ⏳ No iniciada |
+| 5.4 | ✅ Completa — `MergeService` + `dolt-merge-cli` exponen `POST /api/v1/versioning/repos/:repoId/merge`, ejecutan `dolt merge` real, traducen `dolt_conflicts*` a JSON estructurado y auto-abortan merges conflictuados tras capturar conflictos para dejar el working tree limpio y predecible. |
 | 5.5 | ⏳ No iniciada |
 | 5.6 | ⏳ No iniciada |
 | 5.7 | ✅ Completa — `contexts/auth` migra a `LibsqlUserStore` con bootstrap env opcional + fallback legacy `DELTIX_LOCAL_USERS`; `AuthService` agrega setup inicial race-safe, CRUD/soft-delete/hard-delete con analítica de sesiones activas, y Admin UI incorpora `/admin/setup` + panel `/admin/users` con tours driver.js independientes. |
