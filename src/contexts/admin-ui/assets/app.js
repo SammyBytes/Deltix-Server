@@ -44,6 +44,7 @@ function showSession(username) {
     sessionPanel.classList.remove('hidden');
     sessionUsername.textContent = username;
   });
+  maybeRunAddonsTour();
 }
 
 function showForm() {
@@ -259,5 +260,43 @@ if (!localStorage.getItem('deltix-admin-tour-seen') && window.driver) {
   });
   driverInstance.drive();
   localStorage.setItem('deltix-admin-tour-seen', 'true');
+}
+
+/**
+ * Fase 4 feature tour: introduces the "Community addon trust (TOFU)" panel
+ * the first time an admin sees the session view. Runs independently from
+ * the login tour above (separate localStorage flag) so an admin who
+ * already dismissed the login tour still gets to learn about addons once.
+ */
+function maybeRunAddonsTour() {
+  if (localStorage.getItem('deltix-admin-addons-tour-seen') || !window.driver) return;
+
+  const driverInstance = window.driver.js.driver({
+    showProgress: true,
+    steps: [
+      {
+        element: '#trust-form',
+        popover: {
+          title: 'Trust a community addon (TOFU)',
+          description:
+            'Paste an addon name and the author\'s Ed25519 public key (generated via ' +
+            '`bun run scripts/generate-addon-author-keypair.ts`) to trust it. ' +
+            'Trust-On-First-Use: once registered, only a package signed with that exact ' +
+            'key will load for that addon name.',
+        },
+      },
+      {
+        element: '#trust-list',
+        popover: {
+          title: 'Currently trusted addons',
+          description:
+            'Every community addon your license allows, with who trusted it and when. ' +
+            'Revoke a key here at any time — it takes effect on the next server restart.',
+        },
+      },
+    ],
+  });
+  driverInstance.drive();
+  localStorage.setItem('deltix-admin-addons-tour-seen', 'true');
 }
 
