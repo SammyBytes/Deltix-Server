@@ -1,9 +1,15 @@
 import { describe, expect, it } from 'bun:test';
 import { createAdminUiRouter } from '../../../src/contexts/admin-ui/admin-ui.router';
 
+const configuredAuthService = {
+  async getSetupStatus() {
+    return { eligible: false, reason: 'users_exist' as const };
+  },
+};
+
 describe('admin-ui/admin-ui.router (unit, real Hono.fetch)', () => {
   it('GET /admin serves the login page as HTML', async () => {
-    const app = createAdminUiRouter();
+    const app = createAdminUiRouter(configuredAuthService as never);
 
     const res = await app.request('/');
 
@@ -14,7 +20,7 @@ describe('admin-ui/admin-ui.router (unit, real Hono.fetch)', () => {
   });
 
   it('GET / does not embed any secret/token/key literal in the served HTML', async () => {
-    const app = createAdminUiRouter();
+    const app = createAdminUiRouter(configuredAuthService as never);
 
     const res = await app.request('/');
     const body = await res.text();
@@ -24,7 +30,7 @@ describe('admin-ui/admin-ui.router (unit, real Hono.fetch)', () => {
   });
 
   it('sets a restrictive Content-Security-Policy header', async () => {
-    const app = createAdminUiRouter();
+    const app = createAdminUiRouter(configuredAuthService as never);
 
     const res = await app.request('/');
 
@@ -34,7 +40,7 @@ describe('admin-ui/admin-ui.router (unit, real Hono.fetch)', () => {
   });
 
   it('CSP has no unsafe-inline for scripts (the page logic must load as an external file)', async () => {
-    const app = createAdminUiRouter();
+    const app = createAdminUiRouter(configuredAuthService as never);
 
     const res = await app.request('/');
     const csp = res.headers.get('content-security-policy') ?? '';
@@ -45,23 +51,32 @@ describe('admin-ui/admin-ui.router (unit, real Hono.fetch)', () => {
   });
 
   it('the served HTML has no inline <script> body — only external src= scripts', async () => {
-    const app = createAdminUiRouter();
+    const app = createAdminUiRouter(configuredAuthService as never);
 
     const res = await app.request('/');
     const body = await res.text();
 
-    // Every <script ...> tag must either self-close or be immediately
-    // followed by </script> (no inline JS body), otherwise a strict CSP
-    // without 'unsafe-inline' silently drops the script and the login form
-    // falls back to a native GET submit — leaking the password into the URL.
     const scriptTagPattern = /<script\b[^>]*>([\s\S]*?)<\/script>/g;
     for (const match of body.matchAll(scriptTagPattern)) {
       expect(match[1].trim()).toBe('');
     }
   });
 
+  it('GET /setup serves the setup page when setup is still eligible', async () => {
+    const app = createAdminUiRouter({
+      async getSetupStatus() {
+        return { eligible: true, reason: 'not_configured' as const };
+      },
+    } as never);
+
+    const res = await app.request('/setup');
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    expect(body).toContain('Deltix initial setup');
+  });
+
   it('GET /app.js serves the page logic as same-origin JavaScript', async () => {
-    const app = createAdminUiRouter();
+    const app = createAdminUiRouter(configuredAuthService as never);
 
     const res = await app.request('/app.js');
 

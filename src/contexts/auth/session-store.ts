@@ -16,4 +16,5 @@ export interface SessionStore {
   get(refreshToken: string): Promise<StoredSession | null>;
   touch(refreshToken: string, newExpiresAt: number): Promise<void>;
   revoke(refreshToken: string): Promise<void>;
+  countActiveSessionsForUser(username: string, now: number): Promise<number>;
 }

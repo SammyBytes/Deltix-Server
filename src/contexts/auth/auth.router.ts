@@ -1,34 +1,3 @@
-/**
- * HonoJS presentation layer for the auth context. Parses/validates request
- * bodies and formats responses — no business logic here (all of it lives in
- * `AuthService`). Kept intentionally thin per copilot-instructions.md.
- *
- * The refresh token is ALSO set as an httpOnly, SameSite=Strict cookie on
- * login/refresh (in addition to being returned in the JSON body, for the
- * CLI which has no cookie jar). Browser clients (Admin Web UI) rely
- * exclusively on the cookie — it is never read by JavaScript — so a page
- * reload can call POST /refresh with no body and silently restore the
- * session, instead of forcing a fresh login. The CLI keeps using the JSON
- * body value directly, unaffected by this cookie.
- *
- * `secure` is only forced on in production: browsers refuse `Secure`
- * cookies over plain HTTP, and this server is commonly run over HTTP on
- * localhost/private networks in dev/test. NEVER weaken this in a real
- * production deployment — it MUST be served behind TLS there.
- *
- * CSRF defense-in-depth: `SameSite=Strict` already blocks the cookie from
- * being sent on cross-site navigations/requests in all modern browsers,
- * but as a second layer (older browsers, future SameSite regressions,
- * defense-in-depth per OWASP ASVS V4), every request that ends up
- * authenticating via the cookie (rather than an explicit body
- * `refreshToken`, which is what the CLI uses) must present an `Origin`
- * header that matches this server's own `Host` header — i.e. same-origin
- * only. A request with no `Origin` header at all (same-origin fetches
- * sometimes omit it, and non-browser HTTP clients like the CLI never
- * cookie-auth in the first place) is allowed through; a request with a
- * MISMATCHED `Origin` is rejected outright.
- */
-
 import type { Context } from 'hono';
 import { Hono } from 'hono';
 import { deleteCookie, getCookie, setCookie } from 'hono/cookie';
@@ -39,16 +8,25 @@ import {
   InvalidCredentialsError,
   SessionExpiredError,
   SessionNotFoundError,
+  SetupAlreadyConfiguredError,
   TooManyLoginAttemptsError,
+  UserAlreadyExistsError,
+  UserHasActiveSessionsError,
+  UserInactiveError,
+  UserNotFoundError,
 } from './errors';
 
 const logger = createLogger('http:auth');
-
 const REFRESH_TOKEN_COOKIE = 'deltix_refresh_token';
 
 const loginBodySchema = z.object({
   username: z.string().min(1).max(256),
   password: z.string().min(1).max(1024),
+});
+
+const createUserSchema = z.object({
+  username: z.string().min(1).max(256),
+  password: z.string().min(8).max(1024),
 });
 
 const sessionTokenBodySchema = z.object({
@@ -64,13 +42,6 @@ function setRefreshTokenCookie(c: Context, token: string, secure: boolean) {
   });
 }
 
-/**
- * Returns true if this request is safe to authenticate via the
- * cookie-derived refresh token: either it carries no `Origin` header at
- * all (non-browser client, e.g. the CLI, or a same-origin request that
- * omitted it), or the `Origin` it does carry matches this server's own
- * scheme+host, per the `Host` header Hono/Bun expose for the request.
- */
 function isSameOriginOrNoOrigin(c: Context): boolean {
   const origin = c.req.header('origin');
   if (!origin) {
@@ -88,8 +59,58 @@ function isSameOriginOrNoOrigin(c: Context): boolean {
   }
 }
 
+export async function authenticateBearerToken(
+  authHeader: string | undefined,
+  authService: AuthService,
+): Promise<string | null> {
+  if (!authHeader?.startsWith('Bearer ')) {
+    return null;
+  }
+  const token = authHeader.slice('Bearer '.length).trim();
+  if (!token) {
+    return null;
+  }
+  try {
+    const claims = await authService.verifyAccessToken(token);
+    return claims.sub;
+  } catch {
+    return null;
+  }
+}
+
 export function createAuthRouter(authService: AuthService, secureCookies = true): Hono {
   const app = new Hono();
+
+  app.get('/setup-status', async (c) => {
+    const status = await authService.getSetupStatus();
+    return c.json(status, status.eligible ? 200 : 404);
+  });
+
+  app.post('/setup', async (c) => {
+    const status = await authService.getSetupStatus();
+    if (!status.eligible) {
+      return c.json({ error: 'Setup already completed', reason: status.reason }, 404);
+    }
+
+    const parsed = createUserSchema.safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) {
+      return c.json({ error: 'Invalid request body', details: parsed.error.issues }, 400);
+    }
+
+    try {
+      const user = await authService.setupFirstAdmin(parsed.data);
+      logger.info({ username: user.username }, 'Initial admin created via setup wizard');
+      return c.json({ user: { username: user.username, createdAt: user.createdAt } }, 201);
+    } catch (err) {
+      if (err instanceof SetupAlreadyConfiguredError) {
+        return c.json({ error: err.message }, 404);
+      }
+      if (err instanceof UserAlreadyExistsError) {
+        return c.json({ error: err.message }, 409);
+      }
+      throw err;
+    }
+  });
 
   app.post('/login', async (c) => {
     const parsed = loginBodySchema.safeParse(await c.req.json().catch(() => null));
@@ -102,7 +123,7 @@ export function createAuthRouter(authService: AuthService, secureCookies = true)
       setRefreshTokenCookie(c, result.refreshToken, secureCookies);
       return c.json(result, 200);
     } catch (err) {
-      if (err instanceof InvalidCredentialsError) {
+      if (err instanceof InvalidCredentialsError || err instanceof UserInactiveError) {
         logger.warn({ username: parsed.data.username }, 'Login failed: invalid credentials');
         return c.json({ error: 'Invalid credentials' }, 401);
       }
@@ -123,9 +144,6 @@ export function createAuthRouter(authService: AuthService, secureCookies = true)
     if (!refreshToken) {
       return c.json({ error: 'No active session' }, 401);
     }
-    // Only enforce the same-origin check when we actually fell back to the
-    // cookie — an explicit body refreshToken (the CLI's path, which has no
-    // cookie jar and no CSRF exposure) never goes through this check.
     if (!parsed.data.refreshToken && !isSameOriginOrNoOrigin(c)) {
       return c.json({ error: 'Cross-origin request rejected' }, 403);
     }
@@ -152,9 +170,6 @@ export function createAuthRouter(authService: AuthService, secureCookies = true)
     if (!refreshToken) {
       return c.json({ error: 'Invalid request body' }, 400);
     }
-    // Only enforce the same-origin check when we actually fell back to the
-    // cookie — an explicit body refreshToken (the CLI's path) is never
-    // cookie-driven and has no CSRF exposure to defend against here.
     if (!parsed.data.refreshToken && !isSameOriginOrNoOrigin(c)) {
       return c.json({ error: 'Cross-origin request rejected' }, 403);
     }
@@ -184,6 +199,89 @@ export function createAuthRouter(authService: AuthService, secureCookies = true)
     }
     deleteCookie(c, REFRESH_TOKEN_COOKIE, { path: '/' });
     return c.json({ ok: true }, 200);
+  });
+
+  app.get('/users', async (c) => {
+    const username = await authenticateBearerToken(c.req.header('authorization'), authService);
+    if (!username) {
+      return c.json({ error: 'Unauthorized' }, 401);
+    }
+    const users = await authService.listUsers();
+    return c.json({ users }, 200);
+  });
+
+  app.post('/users', async (c) => {
+    const username = await authenticateBearerToken(c.req.header('authorization'), authService);
+    if (!username) {
+      return c.json({ error: 'Unauthorized' }, 401);
+    }
+    const parsed = createUserSchema.safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) {
+      return c.json({ error: 'Invalid request body', details: parsed.error.issues }, 400);
+    }
+    try {
+      const user = await authService.createUser({ ...parsed.data, createdBy: username });
+      return c.json(
+        { user: { username: user.username, createdAt: user.createdAt, active: true } },
+        201,
+      );
+    } catch (err) {
+      if (err instanceof UserAlreadyExistsError) {
+        return c.json({ error: err.message }, 409);
+      }
+      throw err;
+    }
+  });
+
+  app.post('/users/:username/deactivate', async (c) => {
+    const caller = await authenticateBearerToken(c.req.header('authorization'), authService);
+    if (!caller) {
+      return c.json({ error: 'Unauthorized' }, 401);
+    }
+    try {
+      await authService.deactivateUser(c.req.param('username'));
+      return c.json({ ok: true }, 200);
+    } catch (err) {
+      if (err instanceof UserNotFoundError) {
+        return c.json({ error: err.message }, 404);
+      }
+      throw err;
+    }
+  });
+
+  app.post('/users/:username/reactivate', async (c) => {
+    const caller = await authenticateBearerToken(c.req.header('authorization'), authService);
+    if (!caller) {
+      return c.json({ error: 'Unauthorized' }, 401);
+    }
+    try {
+      await authService.reactivateUser(c.req.param('username'));
+      return c.json({ ok: true }, 200);
+    } catch (err) {
+      if (err instanceof UserNotFoundError) {
+        return c.json({ error: err.message }, 404);
+      }
+      throw err;
+    }
+  });
+
+  app.delete('/users/:username', async (c) => {
+    const caller = await authenticateBearerToken(c.req.header('authorization'), authService);
+    if (!caller) {
+      return c.json({ error: 'Unauthorized' }, 401);
+    }
+    try {
+      await authService.deleteUser(c.req.param('username'));
+      return c.json({ ok: true }, 200);
+    } catch (err) {
+      if (err instanceof UserHasActiveSessionsError) {
+        return c.json({ error: err.message }, 409);
+      }
+      if (err instanceof UserNotFoundError) {
+        return c.json({ error: err.message }, 404);
+      }
+      throw err;
+    }
   });
 
   return app;

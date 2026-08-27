@@ -1,38 +1,44 @@
 import { beforeEach, describe, expect, it } from 'bun:test';
-import { rm } from 'node:fs/promises';
+import { mkdtemp } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { createAuthRouter } from '../../../src/contexts/auth/auth.router';
 import { AuthService } from '../../../src/contexts/auth/auth.service';
 import { LibsqlSessionStore } from '../../../src/contexts/auth/libsql-session-store';
+import { LibsqlUserStore } from '../../../src/contexts/auth/libsql-user-store';
 import { hashPassword } from '../../../src/contexts/auth/password-authenticator';
 import { generateTestJwtKeypairPem } from '../../fixtures/license-fixtures';
 
-/**
- * Adversarial-input coverage for the auth router: malformed JSON, wrong
- * types, oversized/edge-case strings, missing headers, wrong content-type,
- * and prototype-pollution-style keys. None of these should ever reach the
- * service layer as valid input or cause a 5xx — the router must reject them
- * at the zod boundary with a 400.
- */
 describe('auth/auth.router fuzzing (integration, adversarial payloads)', () => {
-  const dbPath = `/tmp/deltix-auth-router-fuzz-test-${Date.now()}.db`;
   let app: ReturnType<typeof createAuthRouter>;
 
   beforeEach(async () => {
-    await rm(dbPath, { force: true });
-    const store = new LibsqlSessionStore(dbPath);
+    const tempDir = await mkdtemp(join(tmpdir(), 'deltix-auth-router-fuzz-test-'));
+    const store = new LibsqlSessionStore(join(tempDir, 'sessions.db'));
     await store.init();
+    const userStore = new LibsqlUserStore(join(tempDir, 'users.db'));
+    await userStore.init();
     const { privateKeyPem, publicKeyPem } = generateTestJwtKeypairPem();
+    await userStore.create({
+      username: 'alice',
+      passwordHash: await hashPassword('s3cret-pass'),
+      createdAt: Date.now(),
+      createdBy: 'seed',
+      active: true,
+      lastLoginAt: null,
+    });
 
     const service = new AuthService(
       {
-        users: [{ username: 'alice', passwordHash: await hashPassword('s3cret-pass') }],
         jwtPrivateKeyPem: privateKeyPem,
         jwtPublicKeyPem: publicKeyPem,
         accessTokenTtlSeconds: 900,
         sessionTtlSeconds: 120,
         maxLoginAttempts: 5,
         loginAttemptWindowMs: 60_000,
+        bootstrapAdminConfigured: false,
       },
+      userStore,
       store,
     );
 
@@ -99,9 +105,6 @@ describe('auth/auth.router fuzzing (integration, adversarial payloads)', () => {
   });
 
   it('POST /logout with no refreshToken and no session cookie is a harmless no-op (200, never 5xx)', async () => {
-    // With no refresh token in the body AND no httpOnly cookie present,
-    // there is nothing to revoke — this now mirrors "already logged out",
-    // not a malformed-request error, since /logout also reads the cookie.
     const res = await app.request('/logout', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

@@ -64,7 +64,7 @@ async function main(): Promise<void> {
   app.route('/api/v1/versioning', versioningRouter);
 
   if (env.DELTIX_ADMIN_UI_ENABLED) {
-    app.route('/admin', createAdminUiRouter());
+    app.route('/admin', createAdminUiRouter(authService));
     logger.info('Admin Web UI enabled at /admin');
   }
 

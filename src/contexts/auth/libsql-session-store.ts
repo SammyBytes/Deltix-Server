@@ -63,4 +63,11 @@ export class LibsqlSessionStore implements SessionStore {
       args: [refreshToken],
     });
   }
+  async countActiveSessionsForUser(username: string, now: number): Promise<number> {
+    const result = await this.client.execute({
+      sql: 'SELECT COUNT(*) AS count FROM sessions WHERE username = ? AND expires_at >= ?',
+      args: [username, now],
+    });
+    return Number(result.rows[0]?.count ?? 0);
+  }
 }

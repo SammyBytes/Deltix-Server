@@ -1,12 +1,16 @@
 import { beforeEach, describe, expect, it } from 'bun:test';
 import { generateKeyPairSync } from 'node:crypto';
-import { rm } from 'node:fs/promises';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { AuthService } from '../../../src/contexts/auth/auth.service';
 import {
   InvalidCredentialsError,
   TooManyLoginAttemptsError,
+  UserInactiveError,
 } from '../../../src/contexts/auth/errors';
 import { LibsqlSessionStore } from '../../../src/contexts/auth/libsql-session-store';
+import { LibsqlUserStore } from '../../../src/contexts/auth/libsql-user-store';
 import { hashPassword } from '../../../src/contexts/auth/password-authenticator';
 
 function generateTestEd25519KeyPairPem() {
@@ -18,28 +22,42 @@ function generateTestEd25519KeyPairPem() {
 }
 
 describe('auth/auth.service (integration, real libSQL + real JWT signing)', () => {
-  const dbPath = `/tmp/deltix-auth-service-test-${Date.now()}.db`;
+  let tempDir: string;
   let service: AuthService;
   let now: number;
 
   beforeEach(async () => {
-    await rm(dbPath, { force: true });
-    const store = new LibsqlSessionStore(dbPath);
-    await store.init();
+    tempDir = await mkdtemp(join(tmpdir(), 'deltix-auth-service-test-'));
+    const sessionDbPath = join(tempDir, 'sessions.db');
+    const userDbPath = join(tempDir, 'users.db');
+    const sessionStore = new LibsqlSessionStore(sessionDbPath);
+    await sessionStore.init();
+    const userStore = new LibsqlUserStore(userDbPath);
+    await userStore.init();
 
     const { privateKeyPem, publicKeyPem } = generateTestEd25519KeyPairPem();
     now = 1_700_000_000_000;
+    await userStore.create({
+      username: 'alice',
+      passwordHash: await hashPassword('s3cret-pass'),
+      createdAt: now,
+      createdBy: 'seed',
+      active: true,
+      lastLoginAt: null,
+    });
+
     service = new AuthService(
       {
-        users: [{ username: 'alice', passwordHash: await hashPassword('s3cret-pass') }],
         jwtPrivateKeyPem: privateKeyPem,
         jwtPublicKeyPem: publicKeyPem,
         accessTokenTtlSeconds: 900,
         sessionTtlSeconds: 120,
         maxLoginAttempts: 5,
         loginAttemptWindowMs: 60_000,
+        bootstrapAdminConfigured: false,
       },
-      store,
+      userStore,
+      sessionStore,
       () => now,
     );
   });
@@ -66,10 +84,10 @@ describe('auth/auth.service (integration, real libSQL + real JWT signing)', () =
   it('extends the session on keepAlive and revokes it on logout', async () => {
     const { refreshToken } = await service.login('alice', 's3cret-pass');
 
-    now += 100_000; // within the 120s window
+    now += 100_000;
     await expect(service.keepAlive(refreshToken)).resolves.toBeUndefined();
 
-    now += 100_000; // would be expired without the keepAlive above
+    now += 100_000;
     await expect(service.assertSessionActive(refreshToken)).resolves.toBeUndefined();
 
     await service.logout(refreshToken);
@@ -86,7 +104,7 @@ describe('auth/auth.service (integration, real libSQL + real JWT signing)', () =
   it('refresh() re-issues an access token and extends the session, without requiring credentials', async () => {
     const { refreshToken } = await service.login('alice', 's3cret-pass');
 
-    now += 100_000; // within the 120s window
+    now += 100_000;
     const refreshed = await service.refresh(refreshToken);
 
     expect(refreshed.username).toBe('alice');
@@ -96,11 +114,47 @@ describe('auth/auth.service (integration, real libSQL + real JWT signing)', () =
     const claims = await service.verifyAccessToken(refreshed.accessToken);
     expect(claims.sub).toBe('alice');
 
-    now += 100_000; // would be expired without the refresh() call above sliding the window
+    now += 100_000;
     await expect(service.assertSessionActive(refreshToken)).resolves.toBeUndefined();
   });
 
   it('refresh() rejects an expired or unknown session', async () => {
     await expect(service.refresh('nonexistent-token')).rejects.toThrow();
+  });
+
+  it('rejects login for a deactivated user', async () => {
+    await service.deactivateUser('alice');
+    await expect(service.login('alice', 's3cret-pass')).rejects.toBeInstanceOf(UserInactiveError);
+  });
+
+  it('supports setupFirstAdmin only once against the real libSQL store', async () => {
+    const emptyDir = await mkdtemp(join(tmpdir(), 'deltix-auth-service-empty-'));
+    const emptyUserStore = new LibsqlUserStore(join(emptyDir, 'users.db'));
+    await emptyUserStore.init();
+    const emptySessionStore = new LibsqlSessionStore(join(emptyDir, 'sessions.db'));
+    await emptySessionStore.init();
+    const { privateKeyPem, publicKeyPem } = generateTestEd25519KeyPairPem();
+    const emptyService = new AuthService(
+      {
+        jwtPrivateKeyPem: privateKeyPem,
+        jwtPublicKeyPem: publicKeyPem,
+        accessTokenTtlSeconds: 900,
+        sessionTtlSeconds: 120,
+        maxLoginAttempts: 5,
+        loginAttemptWindowMs: 60_000,
+        bootstrapAdminConfigured: false,
+      },
+      emptyUserStore,
+      emptySessionStore,
+      () => now,
+    );
+
+    const first = await emptyService.setupFirstAdmin({ username: 'root', password: 's3cret-pass' });
+    expect(first.username).toBe('root');
+    await expect(
+      emptyService.setupFirstAdmin({ username: 'second', password: 's3cret-pass' }),
+    ).rejects.toThrow();
+
+    await rm(emptyDir, { recursive: true, force: true });
   });
 });

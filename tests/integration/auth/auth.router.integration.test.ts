@@ -1,9 +1,12 @@
 import { beforeEach, describe, expect, it } from 'bun:test';
 import { generateKeyPairSync } from 'node:crypto';
-import { rm } from 'node:fs/promises';
+import { mkdtemp } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { createAuthRouter } from '../../../src/contexts/auth/auth.router';
 import { AuthService } from '../../../src/contexts/auth/auth.service';
 import { LibsqlSessionStore } from '../../../src/contexts/auth/libsql-session-store';
+import { LibsqlUserStore } from '../../../src/contexts/auth/libsql-user-store';
 import { hashPassword } from '../../../src/contexts/auth/password-authenticator';
 
 function generateTestEd25519KeyPairPem() {
@@ -15,26 +18,40 @@ function generateTestEd25519KeyPairPem() {
 }
 
 describe('auth/auth.router (integration, real HTTP requests via Hono.fetch)', () => {
-  const dbPath = `/tmp/deltix-auth-router-test-${Date.now()}.db`;
+  let tempDir: string;
   let app: ReturnType<typeof createAuthRouter>;
 
   beforeEach(async () => {
-    await rm(dbPath, { force: true });
-    const store = new LibsqlSessionStore(dbPath);
-    await store.init();
+    tempDir = await mkdtemp(join(tmpdir(), 'deltix-auth-router-test-'));
+    const sessionDbPath = join(tempDir, 'sessions.db');
+    const userDbPath = join(tempDir, 'users.db');
+    const sessionStore = new LibsqlSessionStore(sessionDbPath);
+    await sessionStore.init();
+    const userStore = new LibsqlUserStore(userDbPath);
+    await userStore.init();
     const { privateKeyPem, publicKeyPem } = generateTestEd25519KeyPairPem();
+
+    await userStore.create({
+      username: 'alice',
+      passwordHash: await hashPassword('s3cret-pass'),
+      createdAt: Date.now(),
+      createdBy: 'seed',
+      active: true,
+      lastLoginAt: null,
+    });
 
     const service = new AuthService(
       {
-        users: [{ username: 'alice', passwordHash: await hashPassword('s3cret-pass') }],
         jwtPrivateKeyPem: privateKeyPem,
         jwtPublicKeyPem: publicKeyPem,
         accessTokenTtlSeconds: 900,
         sessionTtlSeconds: 120,
         maxLoginAttempts: 5,
         loginAttemptWindowMs: 60_000,
+        bootstrapAdminConfigured: false,
       },
-      store,
+      userStore,
+      sessionStore,
     );
 
     app = createAuthRouter(service);
@@ -73,7 +90,7 @@ describe('auth/auth.router (integration, real HTTP requests via Hono.fetch)', ()
       body: JSON.stringify({ username: 'alice', password: 's3cret-pass' }),
     });
     const setCookieHeader = loginRes.headers.get('set-cookie') ?? '';
-    const cookiePair = setCookieHeader.split(';')[0];
+    const cookiePair = setCookieHeader.split(';')[0] ?? '';
 
     const refreshRes = await app.request('/refresh', {
       method: 'POST',
@@ -118,7 +135,7 @@ describe('auth/auth.router (integration, real HTTP requests via Hono.fetch)', ()
       body: JSON.stringify({ username: 'alice', password: 's3cret-pass' }),
     });
     const setCookieHeader = loginRes.headers.get('set-cookie') ?? '';
-    const cookiePair = setCookieHeader.split(';')[0];
+    const cookiePair = setCookieHeader.split(';')[0] ?? '';
 
     const res = await app.request('/refresh', {
       method: 'POST',
@@ -135,7 +152,7 @@ describe('auth/auth.router (integration, real HTTP requests via Hono.fetch)', ()
       body: JSON.stringify({ username: 'alice', password: 's3cret-pass' }),
     });
     const setCookieHeader = loginRes.headers.get('set-cookie') ?? '';
-    const cookiePair = setCookieHeader.split(';')[0];
+    const cookiePair = setCookieHeader.split(';')[0] ?? '';
 
     const res = await app.request('/refresh', {
       method: 'POST',
@@ -156,7 +173,7 @@ describe('auth/auth.router (integration, real HTTP requests via Hono.fetch)', ()
       body: JSON.stringify({ username: 'alice', password: 's3cret-pass' }),
     });
     const setCookieHeader = loginRes.headers.get('set-cookie') ?? '';
-    const cookiePair = setCookieHeader.split(';')[0];
+    const cookiePair = setCookieHeader.split(';')[0] ?? '';
     const { refreshToken } = (await loginRes.json()) as { refreshToken: string };
 
     await app.request('/logout', {
@@ -241,7 +258,7 @@ describe('auth/auth.router (integration, real HTTP requests via Hono.fetch)', ()
       body: JSON.stringify({ username: 'alice', password: 's3cret-pass' }),
     });
     const setCookieHeader = loginRes.headers.get('set-cookie') ?? '';
-    const cookiePair = setCookieHeader.split(';')[0];
+    const cookiePair = setCookieHeader.split(';')[0] ?? '';
 
     const logoutRes = await app.request('/logout', {
       method: 'POST',

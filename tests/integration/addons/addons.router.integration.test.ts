@@ -5,6 +5,7 @@ import { createAddonsRouter } from '../../../src/contexts/addons/addons.router';
 import { LibsqlAddonTrustStore } from '../../../src/contexts/addons/libsql-addon-trust-store';
 import { AuthService } from '../../../src/contexts/auth/auth.service';
 import { LibsqlSessionStore } from '../../../src/contexts/auth/libsql-session-store';
+import { LibsqlUserStore } from '../../../src/contexts/auth/libsql-user-store';
 import { hashPassword } from '../../../src/contexts/auth/password-authenticator';
 import { generateTestKeypair } from '../../fixtures/license-fixtures';
 
@@ -25,22 +26,34 @@ describe('addons/addons.router (integration, real HTTP requests via Hono.fetch)'
 
   beforeEach(async () => {
     await rm(sessionDbPath, { force: true });
+    await rm(sessionDbPath.replace('sessions', 'users'), { force: true });
     await rm(trustDbPath, { force: true });
 
     const sessionStore = new LibsqlSessionStore(sessionDbPath);
     await sessionStore.init();
+    const userStore = new LibsqlUserStore(sessionDbPath.replace('sessions', 'users'));
+    await userStore.init();
+    await userStore.create({
+      username: 'alice',
+      passwordHash: await hashPassword('s3cret-pass'),
+      createdAt: Date.now(),
+      createdBy: 'seed',
+      active: true,
+      lastLoginAt: null,
+    });
     const { privateKeyPem, publicKeyPem } = generateTestEd25519KeyPairPem();
 
     authService = new AuthService(
       {
-        users: [{ username: 'alice', passwordHash: await hashPassword('s3cret-pass') }],
         jwtPrivateKeyPem: privateKeyPem,
         jwtPublicKeyPem: publicKeyPem,
         accessTokenTtlSeconds: 900,
         sessionTtlSeconds: 120,
         maxLoginAttempts: 5,
         loginAttemptWindowMs: 60_000,
+        bootstrapAdminConfigured: false,
       },
+      userStore,
       sessionStore,
     );
 

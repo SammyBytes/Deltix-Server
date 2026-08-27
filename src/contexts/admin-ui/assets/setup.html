@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en" class="h-full bg-neutral-950">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Deltix Admin Setup</title>
+  <meta name="robots" content="noindex, nofollow" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/driver.js@1.3.1/dist/driver.css" />
+</head>
+<body class="min-h-full bg-neutral-950 p-4 text-neutral-100 sm:p-6">
+  <main class="mx-auto max-w-lg rounded-xl border border-neutral-800 bg-neutral-900 p-5 shadow-xl sm:p-6">
+    <h1 class="text-xl font-semibold">Deltix initial setup</h1>
+    <p class="mt-2 text-sm text-neutral-400">Create the first admin user. This flow is only available once on a fresh instance.</p>
+    <form id="setup-form" class="mt-6 space-y-4">
+      <div>
+        <label for="setup-username" class="mb-1 block text-sm font-medium text-neutral-200">Username</label>
+        <input id="setup-username" name="username" type="text" required autocomplete="username" class="w-full rounded-md border border-neutral-700 bg-neutral-950 px-3 py-2 text-sm outline-none focus:border-neutral-400 focus:ring-2 focus:ring-neutral-600" />
+      </div>
+      <div>
+        <label for="setup-password" class="mb-1 block text-sm font-medium text-neutral-200">Password</label>
+        <input id="setup-password" name="password" type="password" required minlength="8" autocomplete="new-password" class="w-full rounded-md border border-neutral-700 bg-neutral-950 px-3 py-2 text-sm outline-none focus:border-neutral-400 focus:ring-2 focus:ring-neutral-600" />
+      </div>
+      <div>
+        <label for="setup-password-confirm" class="mb-1 block text-sm font-medium text-neutral-200">Confirm password</label>
+        <input id="setup-password-confirm" name="passwordConfirm" type="password" required minlength="8" autocomplete="new-password" class="w-full rounded-md border border-neutral-700 bg-neutral-950 px-3 py-2 text-sm outline-none focus:border-neutral-400 focus:ring-2 focus:ring-neutral-600" />
+      </div>
+      <button id="setup-submit" type="submit" class="w-full rounded-md bg-neutral-100 px-3 py-2 text-sm font-medium text-neutral-900 hover:bg-white focus:outline-none focus:ring-2 focus:ring-neutral-500">Create admin</button>
+      <p id="setup-message" class="hidden text-sm" role="status"></p>
+    </form>
+  </main>
+  <script src="https://cdn.jsdelivr.net/npm/driver.js@1.3.1/dist/driver.js.iife.js"></script>
+  <script src="/admin/app.js"></script>
+</body>
+</html>

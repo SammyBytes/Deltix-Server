@@ -1,34 +1,27 @@
-// The access token stays in memory only, for this tab's lifetime — never
-// localStorage/sessionStorage, to minimize XSS token-theft blast radius.
-// The refresh token is NEVER read/written by this script at all: the
-// server sets it as an httpOnly, Secure, SameSite=Strict cookie on
-// login/refresh, so JavaScript can never see or exfiltrate it. On page
-// load we call POST /refresh (credentials included) to silently restore
-// an existing session from that cookie instead of forcing a fresh login
-// on every reload.
 let accessToken = null;
 let currentUsername = null;
+let pendingDeleteUsername = null;
 
 const form = document.getElementById('login-form');
 const errorMessage = document.getElementById('error-message');
+const loginView = document.getElementById('login-view');
 const sessionPanel = document.getElementById('session-panel');
 const sessionUsername = document.getElementById('session-username');
 const logoutButton = document.getElementById('logout-button');
 const trustForm = document.getElementById('trust-form');
 const trustMessage = document.getElementById('trust-message');
 const trustList = document.getElementById('trust-list');
+const setupForm = document.getElementById('setup-form');
+const setupMessage = document.getElementById('setup-message');
+const userCreateForm = document.getElementById('user-create-form');
+const userMessage = document.getElementById('user-message');
+const userList = document.getElementById('user-list');
+const seatsUsed = document.getElementById('seats-used');
+const deleteConfirmPanel = document.getElementById('delete-confirm-panel');
+const deleteUsername = document.getElementById('delete-username');
+const confirmDeleteButton = document.getElementById('confirm-delete-button');
+const cancelDeleteButton = document.getElementById('cancel-delete-button');
 
-function showError(message) {
-  errorMessage.textContent = message;
-  errorMessage.classList.remove('hidden');
-}
-
-/**
- * Wraps a DOM mutation in the View Transitions API when the browser
- * supports it, so swaps (login <-> session, trust list refresh) cross-fade
- * smoothly instead of popping. Falls back to a plain synchronous call on
- * browsers without support (e.g. older Firefox) — never blocks on it.
- */
 function withViewTransition(mutate) {
   if (typeof document.startViewTransition === 'function') {
     document.startViewTransition(() => mutate());
@@ -37,266 +30,417 @@ function withViewTransition(mutate) {
   }
 }
 
+function setInlineMessage(element, text, isError) {
+  if (!element) return;
+  element.textContent = text;
+  element.classList.remove('hidden', 'text-red-400', 'text-emerald-400');
+  element.classList.add(isError ? 'text-red-400' : 'text-emerald-400');
+}
+
+function clearInlineMessage(element) {
+  if (!element) return;
+  element.textContent = '';
+  element.classList.add('hidden');
+}
+
+function authHeaders() {
+  return accessToken ? { authorization: 'Bearer ' + accessToken } : {};
+}
+
+function cssSafe(value) {
+  return value.replace(/[^a-zA-Z0-9-]/g, '-');
+}
+
 function showSession(username) {
   withViewTransition(() => {
     currentUsername = username;
-    form.classList.add('hidden');
-    sessionPanel.classList.remove('hidden');
-    sessionUsername.textContent = username;
+    if (loginView) loginView.classList.add('hidden');
+    if (sessionPanel) sessionPanel.classList.remove('hidden');
+    if (sessionUsername) sessionUsername.textContent = username;
   });
+  void loadUsers();
+  void loadTrustedAddons();
   maybeRunAddonsTour();
+  maybeRunUsersTour();
 }
 
 function showForm() {
   withViewTransition(() => {
     currentUsername = null;
     accessToken = null;
-    sessionPanel.classList.add('hidden');
-    form.classList.remove('hidden');
-    form.reset();
+    if (sessionPanel) sessionPanel.classList.add('hidden');
+    if (loginView) loginView.classList.remove('hidden');
+    if (form) form.reset();
   });
 }
 
-form.addEventListener('submit', async (event) => {
-  event.preventDefault();
-  errorMessage.classList.add('hidden');
-
-  const username = document.getElementById('username').value;
-  const password = document.getElementById('password').value;
-
-  try {
-    const res = await fetch('/api/v1/auth/login', {
-      method: 'POST',
-      credentials: 'include',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ username, password }),
-    });
-
-    if (!res.ok) {
-      showError('Invalid credentials.');
-      return;
+if (form) {
+  form.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    clearInlineMessage(errorMessage);
+    const username = document.getElementById('username').value;
+    const password = document.getElementById('password').value;
+    try {
+      const res = await fetch('/api/v1/auth/login', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ username, password }),
+      });
+      if (!res.ok) {
+        setInlineMessage(errorMessage, 'Invalid credentials.', true);
+        return;
+      }
+      const data = await res.json();
+      accessToken = data.accessToken;
+      showSession(data.username);
+    } catch {
+      setInlineMessage(errorMessage, 'Could not reach the Deltix-Server.', true);
     }
+  });
+}
 
-    const data = await res.json();
-    accessToken = data.accessToken;
-    showSession(data.username);
-    loadTrustedAddons();
-  } catch {
-    showError('Could not reach the Deltix-Server.');
-  }
-});
+if (logoutButton) {
+  logoutButton.addEventListener('click', async () => {
+    try {
+      await fetch('/api/v1/auth/logout', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+    } finally {
+      showForm();
+    }
+  });
+}
 
-logoutButton.addEventListener('click', async () => {
+async function loadTrustedAddons() {
+  if (!trustList || !accessToken) return;
   try {
-    await fetch('/api/v1/auth/logout', {
-      method: 'POST',
-      credentials: 'include',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({}),
-    });
-  } finally {
-    showForm();
-  }
-});
-
-function showTrustMessage(text, isError) {
-  trustMessage.textContent = text;
-  trustMessage.classList.remove('hidden', 'text-red-400', 'text-emerald-400');
-  trustMessage.classList.add(isError ? 'text-red-400' : 'text-emerald-400');
+    const res = await fetch('/api/v1/addons/trust', { headers: authHeaders() });
+    if (!res.ok) return;
+    const data = await res.json();
+    renderTrustedAddons(data.trusted || []);
+  } catch {}
 }
 
 function renderTrustedAddons(trusted) {
+  if (!trustList) return;
   withViewTransition(() => {
     trustList.innerHTML = '';
-
     if (trusted.length === 0) {
       const emptyRow = document.createElement('tr');
       emptyRow.id = 'trust-empty-row';
-      emptyRow.innerHTML =
-        '<td class="px-3 py-4 text-center text-neutral-500" colspan="5">No community addons trusted yet.</td>';
+      emptyRow.innerHTML = '<td class="px-3 py-4 text-center text-neutral-500" colspan="5">No community addons trusted yet.</td>';
       trustList.append(emptyRow);
       return;
     }
-
     for (const record of trusted) {
       const row = document.createElement('tr');
       row.className = 'border-b border-neutral-800 last:border-0 hover:bg-neutral-800/40';
       row.dataset.vt = 'trust-row';
-      row.style.setProperty('--vt-name', `trust-row-${cssSafe(record.addonName)}`);
-
-      const nameCell = document.createElement('td');
-      nameCell.className = 'px-3 py-2 font-mono';
-      nameCell.textContent = record.addonName;
-
-      const keyCell = document.createElement('td');
-      keyCell.className = 'max-w-[220px] truncate px-3 py-2 font-mono text-neutral-400';
-      keyCell.title = record.authorPublicKey;
-      keyCell.textContent = record.authorPublicKey;
-
-      const trustedAtCell = document.createElement('td');
-      trustedAtCell.className = 'hidden px-3 py-2 text-neutral-400 sm:table-cell';
-      trustedAtCell.textContent = new Date(record.trustedAt).toLocaleString();
-
-      const byCell = document.createElement('td');
-      byCell.className = 'hidden px-3 py-2 text-neutral-400 sm:table-cell';
-      byCell.textContent = record.trustedBy;
-
-      const actionCell = document.createElement('td');
-      actionCell.className = 'px-3 py-2 text-right';
+      row.style.setProperty('--vt-name', 'trust-row-' + cssSafe(record.addonName));
+      row.innerHTML =
+        '<td class="px-3 py-2 font-mono"></td>' +
+        '<td class="max-w-[220px] truncate px-3 py-2 font-mono text-neutral-400"></td>' +
+        '<td class="hidden px-3 py-2 text-neutral-400 sm:table-cell"></td>' +
+        '<td class="hidden px-3 py-2 text-neutral-400 sm:table-cell"></td>' +
+        '<td class="px-3 py-2 text-right"></td>';
+      row.children[0].textContent = record.addonName;
+      row.children[1].textContent = record.authorPublicKey;
+      row.children[1].title = record.authorPublicKey;
+      row.children[2].textContent = new Date(record.trustedAt).toLocaleString();
+      row.children[3].textContent = record.trustedBy;
       const revokeBtn = document.createElement('button');
       revokeBtn.type = 'button';
       revokeBtn.textContent = 'Revoke';
       revokeBtn.className = 'text-red-400 hover:text-red-300';
       revokeBtn.addEventListener('click', () => revokeTrust(record.addonName));
-      actionCell.append(revokeBtn);
-
-      row.append(nameCell, keyCell, trustedAtCell, byCell, actionCell);
+      row.children[4].append(revokeBtn);
       trustList.append(row);
     }
   });
-}
-
-/** Sanitizes an addon name into a safe CSS identifier for view-transition-name. */
-function cssSafe(value) {
-  return value.replace(/[^a-zA-Z0-9-]/g, '-');
-}
-
-async function loadTrustedAddons() {
-  try {
-    const res = await fetch('/api/v1/addons/trust', {
-      headers: { authorization: `Bearer ${accessToken}` },
-    });
-    if (!res.ok) return;
-    const data = await res.json();
-    renderTrustedAddons(data.trusted ?? []);
-  } catch {
-    // Non-fatal: the trust panel just stays empty/stale.
-  }
 }
 
 async function revokeTrust(addonName) {
   try {
     await fetch('/api/v1/addons/revoke', {
       method: 'POST',
-      headers: {
-        authorization: `Bearer ${accessToken}`,
-        'content-type': 'application/json',
-      },
+      headers: Object.assign({ 'content-type': 'application/json' }, authHeaders()),
       body: JSON.stringify({ addonName }),
     });
     await loadTrustedAddons();
   } catch {
-    showTrustMessage('Could not reach the Deltix-Server.', true);
+    setInlineMessage(trustMessage, 'Could not reach the Deltix-Server.', true);
   }
 }
 
-trustForm.addEventListener('submit', async (event) => {
-  event.preventDefault();
-  trustMessage.classList.add('hidden');
+if (trustForm) {
+  trustForm.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    clearInlineMessage(trustMessage);
+    const addonName = document.getElementById('trust-addon-name').value.trim();
+    const authorPublicKey = document.getElementById('trust-public-key').value.trim();
+    try {
+      const res = await fetch('/api/v1/addons/trust', {
+        method: 'POST',
+        headers: Object.assign({ 'content-type': 'application/json' }, authHeaders()),
+        body: JSON.stringify({ addonName, authorPublicKey }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setInlineMessage(trustMessage, data.error || 'Could not trust this key.', true);
+        return;
+      }
+      setInlineMessage(trustMessage, 'Trusted "' + addonName + '". Takes effect on next server restart.', false);
+      trustForm.reset();
+      await loadTrustedAddons();
+    } catch {
+      setInlineMessage(trustMessage, 'Could not reach the Deltix-Server.', true);
+    }
+  });
+}
 
-  const addonName = document.getElementById('trust-addon-name').value.trim();
-  const authorPublicKey = document.getElementById('trust-public-key').value.trim();
-
+async function loadUsers() {
+  if (!userList || !accessToken) return;
   try {
-    const res = await fetch('/api/v1/addons/trust', {
-      method: 'POST',
-      headers: {
-        authorization: `Bearer ${accessToken}`,
-        'content-type': 'application/json',
-      },
-      body: JSON.stringify({ addonName, authorPublicKey }),
-    });
+    const res = await fetch('/api/v1/auth/users', { headers: authHeaders() });
+    if (!res.ok) return;
+    const data = await res.json();
+    renderUsers(data.users || []);
+  } catch {}
+}
 
-    if (!res.ok) {
-      const data = await res.json().catch(() => ({}));
-      showTrustMessage(data.error ?? 'Could not trust this key.', true);
+function renderUsers(users) {
+  if (!userList) return;
+  const activeSeats = users.filter((user) => user.activeSessions > 0).length;
+  if (seatsUsed) {
+    seatsUsed.textContent = String(activeSeats);
+  }
+  withViewTransition(() => {
+    userList.innerHTML = '';
+    if (users.length === 0) {
+      const emptyRow = document.createElement('tr');
+      emptyRow.id = 'user-empty-row';
+      emptyRow.innerHTML = '<td colspan="6" class="px-3 py-4 text-center text-neutral-500">No users created yet.</td>';
+      userList.append(emptyRow);
       return;
     }
+    for (const user of users) {
+      const row = document.createElement('tr');
+      row.className = 'border-b border-neutral-800 last:border-0 hover:bg-neutral-800/40';
+      row.dataset.vt = 'user-row';
+      row.style.setProperty('--vt-name', 'user-row-' + cssSafe(user.username));
+      const actions = document.createElement('td');
+      actions.className = 'px-3 py-2 text-right';
+      const toggleBtn = document.createElement('button');
+      toggleBtn.type = 'button';
+      toggleBtn.className = 'mr-2 rounded-md border border-neutral-700 px-2 py-1 text-xs hover:bg-neutral-800';
+      toggleBtn.textContent = user.active ? 'Deactivate' : 'Reactivate';
+      toggleBtn.setAttribute('aria-label', user.active ? 'Deactivate ' + user.username : 'Reactivate ' + user.username);
+      toggleBtn.addEventListener('click', () => toggleUser(user));
+      const deleteBtn = document.createElement('button');
+      deleteBtn.type = 'button';
+      deleteBtn.className = 'rounded-md border border-red-900 px-2 py-1 text-xs text-red-300 hover:bg-red-950/50';
+      deleteBtn.textContent = 'Delete';
+      deleteBtn.setAttribute('aria-label', 'Delete ' + user.username);
+      deleteBtn.addEventListener('click', () => promptDeleteUser(user.username));
+      actions.append(toggleBtn, deleteBtn);
+      row.innerHTML =
+        '<td class="px-3 py-2 font-medium"></td>' +
+        '<td class="px-3 py-2"></td>' +
+        '<td class="px-3 py-2 text-neutral-400"></td>' +
+        '<td class="px-3 py-2"></td>' +
+        '<td class="px-3 py-2 text-neutral-400"></td>';
+      row.children[0].textContent = user.username;
+      row.children[1].textContent = user.active ? 'Active' : 'Inactive';
+      row.children[2].textContent = new Date(user.createdAt).toLocaleString();
+      row.children[3].textContent = String(user.activeSessions);
+      row.children[4].textContent = user.lastLoginAt ? new Date(user.lastLoginAt).toLocaleString() : 'Never';
+      row.append(actions);
+      userList.append(row);
+    }
+  });
+}
 
-    showTrustMessage(`Trusted "${addonName}". Takes effect on next server restart.`, false);
-    trustForm.reset();
-    await loadTrustedAddons();
+async function toggleUser(user) {
+  try {
+    const res = await fetch('/api/v1/auth/users/' + encodeURIComponent(user.username) + '/' + (user.active ? 'deactivate' : 'reactivate'), {
+      method: 'POST',
+      headers: authHeaders(),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      setInlineMessage(userMessage, data.error || 'Could not update user.', true);
+      return;
+    }
+    setInlineMessage(userMessage, user.active ? 'Usuario desactivado' : 'Usuario reactivado', false);
+    await loadUsers();
   } catch {
-    showTrustMessage('Could not reach the Deltix-Server.', true);
+    setInlineMessage(userMessage, 'Could not reach the Deltix-Server.', true);
   }
-});
+}
 
-/**
- * Runs once on every page load. Attempts to restore an existing session
- * from the httpOnly refresh-token cookie via POST /refresh. If there is no
- * active session (no cookie, or it expired), this silently falls through
- * to the login form — no error is shown, since "not logged in yet" is the
- * normal state on a first visit.
- */
+function promptDeleteUser(username) {
+  pendingDeleteUsername = username;
+  if (deleteUsername) deleteUsername.textContent = username;
+  if (deleteConfirmPanel) deleteConfirmPanel.classList.remove('hidden');
+}
+
+function clearDeletePrompt() {
+  pendingDeleteUsername = null;
+  if (deleteConfirmPanel) deleteConfirmPanel.classList.add('hidden');
+}
+
+if (confirmDeleteButton) {
+  confirmDeleteButton.addEventListener('click', async () => {
+    if (!pendingDeleteUsername) return;
+    try {
+      const res = await fetch('/api/v1/auth/users/' + encodeURIComponent(pendingDeleteUsername), {
+        method: 'DELETE',
+        headers: authHeaders(),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setInlineMessage(userMessage, data.error || 'Could not delete user.', true);
+        return;
+      }
+      setInlineMessage(userMessage, 'Usuario eliminado', false);
+      clearDeletePrompt();
+      await loadUsers();
+    } catch {
+      setInlineMessage(userMessage, 'Could not reach the Deltix-Server.', true);
+    }
+  });
+}
+
+if (cancelDeleteButton) {
+  cancelDeleteButton.addEventListener('click', clearDeletePrompt);
+}
+
+if (userCreateForm) {
+  userCreateForm.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    clearInlineMessage(userMessage);
+    const username = document.getElementById('new-username').value.trim();
+    const password = document.getElementById('new-password').value;
+    try {
+      const res = await fetch('/api/v1/auth/users', {
+        method: 'POST',
+        headers: Object.assign({ 'content-type': 'application/json' }, authHeaders()),
+        body: JSON.stringify({ username, password }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setInlineMessage(userMessage, data.error || 'Could not create user.', true);
+        return;
+      }
+      setInlineMessage(userMessage, 'Usuario creado', false);
+      userCreateForm.reset();
+      await loadUsers();
+    } catch {
+      setInlineMessage(userMessage, 'Could not reach the Deltix-Server.', true);
+    }
+  });
+}
+
+if (setupForm) {
+  setupForm.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    clearInlineMessage(setupMessage);
+    const username = document.getElementById('setup-username').value.trim();
+    const password = document.getElementById('setup-password').value;
+    const confirmation = document.getElementById('setup-password-confirm').value;
+    if (password !== confirmation) {
+      setInlineMessage(setupMessage, 'Passwords must match.', true);
+      return;
+    }
+    try {
+      const res = await fetch('/api/v1/auth/setup', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ username, password }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setInlineMessage(setupMessage, data.error || 'Could not complete setup.', true);
+        return;
+      }
+      setInlineMessage(setupMessage, 'Admin created. Redirecting to sign in…', false);
+      localStorage.setItem('deltix-admin-setup-tour-seen', 'true');
+      window.setTimeout(() => {
+        window.location.href = '/admin';
+      }, 600);
+    } catch {
+      setInlineMessage(setupMessage, 'Could not reach the Deltix-Server.', true);
+    }
+  });
+}
+
 async function restoreSessionOnLoad() {
+  if (setupForm) {
+    maybeRunSetupTour();
+    return;
+  }
   try {
     const res = await fetch('/api/v1/auth/refresh', {
       method: 'POST',
       credentials: 'include',
     });
     if (!res.ok) return;
-
     const data = await res.json();
     accessToken = data.accessToken;
     showSession(data.username);
-    loadTrustedAddons();
-  } catch {
-    // Server unreachable on load — just show the login form, same as any
-    // other "not logged in" case.
-  }
+  } catch {}
 }
 
-restoreSessionOnLoad();
-
-if (!localStorage.getItem('deltix-admin-tour-seen') && window.driver) {
+function maybeRunSetupTour() {
+  if (localStorage.getItem('deltix-admin-setup-tour-seen') || !window.driver || !setupForm) return;
   const driverInstance = window.driver.js.driver({
     showProgress: true,
     steps: [
-      {
-        element: '#login-form',
-        popover: { title: 'Sign in', description: 'Use your local Deltix account credentials.' },
-      },
+      { element: '#setup-form', popover: { title: 'Create the first admin', description: 'Set the first local administrator for this instance. This page disappears as soon as setup completes.' } },
+      { element: '#setup-submit', popover: { title: 'Finish setup', description: 'Once created, sign in with this user and manage additional accounts from the Users panel.' } },
     ],
+  });
+  driverInstance.drive();
+}
+
+if (!localStorage.getItem('deltix-admin-tour-seen') && window.driver && form) {
+  const driverInstance = window.driver.js.driver({
+    showProgress: true,
+    steps: [{ element: '#login-form', popover: { title: 'Sign in', description: 'Use your local Deltix account credentials.' } }],
   });
   driverInstance.drive();
   localStorage.setItem('deltix-admin-tour-seen', 'true');
 }
 
-/**
- * Fase 4 feature tour: introduces the "Community addon trust (TOFU)" panel
- * the first time an admin sees the session view. Runs independently from
- * the login tour above (separate localStorage flag) so an admin who
- * already dismissed the login tour still gets to learn about addons once.
- */
 function maybeRunAddonsTour() {
-  if (localStorage.getItem('deltix-admin-addons-tour-seen') || !window.driver) return;
-
+  if (localStorage.getItem('deltix-admin-addons-tour-seen') || !window.driver || !trustForm) return;
   const driverInstance = window.driver.js.driver({
     showProgress: true,
     steps: [
-      {
-        element: '#trust-form',
-        popover: {
-          title: 'Trust a community addon (TOFU)',
-          description:
-            'Paste an addon name and the author\'s Ed25519 public key (generated via ' +
-            '`bun run scripts/generate-addon-author-keypair.ts`) to trust it. ' +
-            'Trust-On-First-Use: once registered, only a package signed with that exact ' +
-            'key will load for that addon name.',
-        },
-      },
-      {
-        element: '#trust-list',
-        popover: {
-          title: 'Currently trusted addons',
-          description:
-            'Every community addon your license allows, with who trusted it and when. ' +
-            'Revoke a key here at any time — it takes effect on the next server restart.',
-        },
-      },
+      { element: '#trust-form', popover: { title: 'Trust a community addon (TOFU)', description: 'Paste an addon name and the author public key to trust that community addon for the next restart.' } },
+      { element: '#trust-list', popover: { title: 'Trusted addons', description: 'Review which addon keys are currently trusted and revoke them if needed.' } },
     ],
   });
   driverInstance.drive();
   localStorage.setItem('deltix-admin-addons-tour-seen', 'true');
 }
 
+function maybeRunUsersTour() {
+  if (localStorage.getItem('deltix-admin-users-tour-seen') || !window.driver || !userCreateForm) return;
+  const driverInstance = window.driver.js.driver({
+    showProgress: true,
+    steps: [
+      { element: '#users-seats-indicator', popover: { title: 'Seat usage', description: 'This indicator tracks how many users currently have active sessions.' } },
+      { element: '#user-create-form', popover: { title: 'Create user', description: 'Create a new local user without restarting the server.' } },
+      { element: '#user-list', popover: { title: 'User table', description: 'Review account status, creation date, last login and active sessions at a glance.' } },
+    ],
+  });
+  driverInstance.drive();
+  localStorage.setItem('deltix-admin-users-tour-seen', 'true');
+}
+
+restoreSessionOnLoad();

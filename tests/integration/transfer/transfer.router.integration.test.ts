@@ -3,6 +3,7 @@ import { generateKeyPairSync } from 'node:crypto';
 import { rm } from 'node:fs/promises';
 import { AuthService } from '../../../src/contexts/auth/auth.service';
 import { LibsqlSessionStore } from '../../../src/contexts/auth/libsql-session-store';
+import { LibsqlUserStore } from '../../../src/contexts/auth/libsql-user-store';
 import { hashPassword } from '../../../src/contexts/auth/password-authenticator';
 import { LibsqlTicketStore } from '../../../src/contexts/transfer/libsql-ticket-store';
 import { TicketService } from '../../../src/contexts/transfer/ticket.service';
@@ -24,22 +25,34 @@ describe('transfer/transfer.router (integration, real HTTP requests via Hono.fet
 
   beforeEach(async () => {
     await rm(sessionDbPath, { force: true });
+    await rm(sessionDbPath.replace('sessions', 'users'), { force: true });
     await rm(ticketDbPath, { force: true });
 
     const sessionStore = new LibsqlSessionStore(sessionDbPath);
     await sessionStore.init();
+    const userStore = new LibsqlUserStore(sessionDbPath.replace('sessions', 'users'));
+    await userStore.init();
+    await userStore.create({
+      username: 'alice',
+      passwordHash: await hashPassword('s3cret-pass'),
+      createdAt: Date.now(),
+      createdBy: 'seed',
+      active: true,
+      lastLoginAt: null,
+    });
     const { privateKeyPem, publicKeyPem } = generateTestEd25519KeyPairPem();
 
     authService = new AuthService(
       {
-        users: [{ username: 'alice', passwordHash: await hashPassword('s3cret-pass') }],
         jwtPrivateKeyPem: privateKeyPem,
         jwtPublicKeyPem: publicKeyPem,
         accessTokenTtlSeconds: 900,
         sessionTtlSeconds: 120,
         maxLoginAttempts: 5,
         loginAttemptWindowMs: 60_000,
+        bootstrapAdminConfigured: false,
       },
+      userStore,
       sessionStore,
     );
 

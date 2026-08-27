@@ -1,24 +1,32 @@
-/**
- * Orchestrates the full Fase 2 auth flow: credential check → rate limiting
- * → access token issuance → sliding-window session creation, and the
- * inverse operations (keep-alive, logout). This is the context's core
- * service; `contexts/auth/index.ts` is the only file allowed to export it.
- */
+import {
+  SetupAlreadyConfiguredError,
+  UserAlreadyExistsError,
+  UserHasActiveSessionsError,
+  UserInactiveError,
+  UserNotFoundError,
+} from './errors';
 import { issueAccessToken, verifyAccessToken } from './jwt-issuer';
 import { LoginRateLimiter } from './login-rate-limiter';
-import { verifyCredentials } from './password-authenticator';
+import { hashPassword, verifyCredentials } from './password-authenticator';
 import { SlidingWindowSessionManager } from './session-manager';
 import type { SessionStore } from './session-store';
-import type { AccessTokenClaims, LocalUser, LoginResult } from './types';
+import type {
+  AccessTokenClaims,
+  CreateUserInput,
+  LoginResult,
+  SetupStatus,
+  UserSummary,
+} from './types';
+import type { UserRecord, UserStore } from './user-store';
 
 export interface AuthServiceConfig {
-  users: LocalUser[];
   jwtPrivateKeyPem: string;
   jwtPublicKeyPem: string;
   accessTokenTtlSeconds: number;
   sessionTtlSeconds: number;
   maxLoginAttempts: number;
   loginAttemptWindowMs: number;
+  bootstrapAdminConfigured: boolean;
 }
 
 export class AuthService {
@@ -27,8 +35,9 @@ export class AuthService {
 
   constructor(
     private readonly config: AuthServiceConfig,
-    sessionStore: SessionStore,
-    now: () => number = () => Date.now(),
+    private readonly userStore: UserStore,
+    private readonly sessionStore: SessionStore,
+    private readonly now: () => number = () => Date.now(),
   ) {
     this.rateLimiter = new LoginRateLimiter(
       config.maxLoginAttempts,
@@ -46,7 +55,13 @@ export class AuthService {
     this.rateLimiter.assertAllowed(username);
     this.rateLimiter.recordAttempt(username);
 
-    const authenticatedUsername = await verifyCredentials(username, password, this.config.users);
+    const user = await this.findUserForLogin(username);
+    if (!user.active) {
+      throw new UserInactiveError(username);
+    }
+
+    const authenticatedUsername = await verifyCredentials(username, password, [user]);
+    await this.userStore.updateLastLogin(authenticatedUsername, this.now());
 
     const accessToken = await issueAccessToken(
       authenticatedUsername,
@@ -67,12 +82,6 @@ export class AuthService {
     await this.sessionManager.keepAlive(refreshToken);
   }
 
-  /**
-   * Re-issues a fresh access token for an existing, still-active session —
-   * used by the Admin Web UI on page load/refresh to restore a session from
-   * its httpOnly refresh-token cookie without asking the user to log in
-   * again, while never exposing the refresh token itself to JavaScript.
-   */
   async refresh(refreshToken: string): Promise<LoginResult> {
     const username = await this.sessionManager.usernameFor(refreshToken);
     await this.sessionManager.keepAlive(refreshToken);
@@ -101,5 +110,147 @@ export class AuthService {
 
   async verifyAccessToken(accessToken: string): Promise<AccessTokenClaims> {
     return verifyAccessToken(accessToken, this.config.jwtPublicKeyPem);
+  }
+
+  async createUser(input: CreateUserInput): Promise<UserRecord> {
+    const existing = await this.userStore.getByUsername(input.username);
+    if (existing) {
+      throw new UserAlreadyExistsError(input.username);
+    }
+    const record = await this.buildUserRecord(input.username, input.password, input.createdBy);
+    await this.userStore.create(record);
+    return record;
+  }
+
+  async listUsers(): Promise<UserSummary[]> {
+    const users = await this.userStore.list();
+    return Promise.all(
+      users.map(async (user) => ({
+        ...user,
+        activeSessions: await this.sessionStore.countActiveSessionsForUser(
+          user.username,
+          this.now(),
+        ),
+      })),
+    );
+  }
+
+  async deactivateUser(username: string): Promise<void> {
+    const updated = await this.userStore.setActive(username, false);
+    if (!updated) {
+      throw new UserNotFoundError(username);
+    }
+  }
+
+  async reactivateUser(username: string): Promise<void> {
+    const updated = await this.userStore.setActive(username, true);
+    if (!updated) {
+      throw new UserNotFoundError(username);
+    }
+  }
+
+  async deleteUser(username: string): Promise<void> {
+    const activeSessions = await this.sessionStore.countActiveSessionsForUser(username, this.now());
+    if (activeSessions > 0) {
+      throw new UserHasActiveSessionsError(username);
+    }
+    const deleted = await this.userStore.delete(username);
+    if (!deleted) {
+      throw new UserNotFoundError(username);
+    }
+  }
+
+  async getSetupStatus(): Promise<SetupStatus> {
+    if (this.config.bootstrapAdminConfigured) {
+      return { eligible: false, reason: 'bootstrap_env_configured' };
+    }
+    const count = await this.userStore.count();
+    return count === 0
+      ? { eligible: true, reason: 'not_configured' }
+      : { eligible: false, reason: 'users_exist' };
+  }
+
+  async setupFirstAdmin(input: { username: string; password: string }): Promise<UserRecord> {
+    const status = await this.getSetupStatus();
+    if (!status.eligible) {
+      throw new SetupAlreadyConfiguredError();
+    }
+    const record = await this.buildUserRecord(input.username, input.password, 'setup-wizard');
+    const created = await this.userStore.tryCreateFirstUser(record);
+    if (!created) {
+      throw new SetupAlreadyConfiguredError();
+    }
+    return record;
+  }
+
+  async ensureBootstrapAdmin(
+    credentials: { username: string; password: string } | null,
+  ): Promise<void> {
+    if (!credentials) {
+      return;
+    }
+    const count = await this.userStore.count();
+    if (count > 0) {
+      return;
+    }
+    const record = await this.buildUserRecord(
+      credentials.username,
+      credentials.password,
+      'bootstrap-env',
+    );
+    const created = await this.userStore.tryCreateFirstUser(record);
+    if (!created) {
+      throw new SetupAlreadyConfiguredError(
+        'Bootstrap admin could not be created because setup already completed',
+      );
+    }
+  }
+
+  async legacyUsers() {
+    return this.userStore.legacyUsers();
+  }
+
+  private async findUserForLogin(username: string): Promise<UserRecord> {
+    const dbUser = await this.userStore.getByUsername(username);
+    if (dbUser) {
+      return dbUser;
+    }
+
+    const legacyUsers = await this.userStore.legacyUsers();
+    const legacyUser = legacyUsers.find((candidate) => candidate.username === username);
+    if (legacyUser) {
+      return {
+        username: legacyUser.username,
+        passwordHash: legacyUser.passwordHash,
+        createdAt: 0,
+        createdBy: 'legacy-env',
+        active: true,
+        lastLoginAt: null,
+      };
+    }
+
+    return {
+      username,
+      passwordHash: '',
+      createdAt: 0,
+      createdBy: 'unknown',
+      active: true,
+      lastLoginAt: null,
+    };
+  }
+
+  private async buildUserRecord(
+    username: string,
+    password: string,
+    createdBy: string,
+  ): Promise<UserRecord> {
+    return {
+      username,
+      passwordHash: await hashPassword(password),
+      createdAt: this.now(),
+      createdBy,
+      active: true,
+      lastLoginAt: null,
+    };
   }
 }

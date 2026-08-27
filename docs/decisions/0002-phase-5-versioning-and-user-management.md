@@ -130,12 +130,7 @@ modelo de usuarios ya existe de verdad)**.
     de la Admin UI.
 
 ### Preguntas abiertas para antes de codificar
-- ¿El primer admin se crea solo vía `/admin/setup` en el navegador, o también debe
-  poder crearse por variable de entorno en despliegues automatizados (Docker/CD)
-  donde no hay un humano haciendo clic? → Propuesta: soportar ambos — env var
-  `DELTIX_BOOTSTRAP_ADMIN_USERNAME`/`PASSWORD` para IaC, y el wizard web para
-  instalaciones manuales, mutuamente excluyentes (si la env var está presente,
-  `/admin/setup` queda deshabilitado desde el arranque).
+- ✅ Decisión tomada: soportar ambos caminos de bootstrap, mutuamente excluyentes. Si `DELTIX_BOOTSTRAP_ADMIN_USERNAME` y `DELTIX_BOOTSTRAP_ADMIN_PASSWORD` están presentes, el primer admin se crea automáticamente al boot y `/admin/setup` queda deshabilitado (404). Si no están presentes, el wizard web queda disponible solo mientras la tabla `users` siga vacía. `DELTIX_LOCAL_USERS` permanece como fallback legacy de solo lectura para compatibilidad, pero la fuente de verdad pasa a ser libSQL.
 
 ---
 
@@ -217,5 +212,5 @@ modelo de usuarios ya existe de verdad)**.
 | 5.4 | ⏳ No iniciada |
 | 5.5 | ⏳ No iniciada |
 | 5.6 | ⏳ No iniciada |
-| 5.7 | ⏳ No iniciada |
+| 5.7 | ✅ Completa — `contexts/auth` migra a `LibsqlUserStore` con bootstrap env opcional + fallback legacy `DELTIX_LOCAL_USERS`; `AuthService` agrega setup inicial race-safe, CRUD/soft-delete/hard-delete con analítica de sesiones activas, y Admin UI incorpora `/admin/setup` + panel `/admin/users` con tours driver.js independientes. |
 | 5.8 | ⏳ No iniciada |
