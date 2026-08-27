@@ -11,6 +11,7 @@
 import { Hono } from 'hono';
 import {
   AddonCircuitBreaker,
+  createAddonsRouter,
   createAddonTrustStore,
   discoverAndLoadAddons,
 } from './contexts/addons';
@@ -45,15 +46,18 @@ async function main(): Promise<void> {
   const authService = await createAuthService(env);
   const ticketService = await createTicketService(env);
   const nasSyncService = await createNasSyncService(env);
+  const addonTrustStore = await createAddonTrustStore(env);
   const secureCookies = env.NODE_ENV === 'production';
   const authRouter = createAuthRouter(authService, secureCookies);
   const transferRouter = createTransferRouter(authService, ticketService);
   const storageRouter = createStorageRouter(authService, nasSyncService);
+  const addonsRouter = createAddonsRouter(authService, addonTrustStore);
   const app = new Hono();
   applySecurityMiddleware(app, { allowedOrigins: env.DELTIX_CORS_ALLOWED_ORIGINS });
   app.route('/api/v1/auth', authRouter);
   app.route('/api/v1', transferRouter);
   app.route('/api/v1/storage', storageRouter);
+  app.route('/api/v1/addons', addonsRouter);
 
   if (env.DELTIX_ADMIN_UI_ENABLED) {
     app.route('/admin', createAdminUiRouter());
@@ -92,7 +96,6 @@ async function main(): Promise<void> {
   // license enforcement -> import(). One bad addon never aborts the others
   // or the control plane boot; see docs/decisions/0001-*.md.
   const addonsConfig = resolveLicenseAddonsConfig(result.license);
-  const addonTrustStore = await createAddonTrustStore(env);
   const addonCircuitBreaker = new AddonCircuitBreaker({
     maxConsecutiveFailures: env.DELTIX_ADDON_MAX_CONSECUTIVE_FAILURES,
     onDisabled: (addonName) => {

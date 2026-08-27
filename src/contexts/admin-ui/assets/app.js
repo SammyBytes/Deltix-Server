@@ -14,6 +14,9 @@ const errorMessage = document.getElementById('error-message');
 const sessionPanel = document.getElementById('session-panel');
 const sessionUsername = document.getElementById('session-username');
 const logoutButton = document.getElementById('logout-button');
+const trustForm = document.getElementById('trust-form');
+const trustMessage = document.getElementById('trust-message');
+const trustList = document.getElementById('trust-list');
 
 function showError(message) {
   errorMessage.textContent = message;
@@ -58,6 +61,7 @@ form.addEventListener('submit', async (event) => {
     const data = await res.json();
     accessToken = data.accessToken;
     showSession(data.username);
+    loadTrustedAddons();
   } catch {
     showError('Could not reach the Deltix-Server.');
   }
@@ -73,6 +77,94 @@ logoutButton.addEventListener('click', async () => {
     });
   } finally {
     showForm();
+  }
+});
+
+function showTrustMessage(text, isError) {
+  trustMessage.textContent = text;
+  trustMessage.classList.remove('hidden', 'text-red-400', 'text-emerald-400');
+  trustMessage.classList.add(isError ? 'text-red-400' : 'text-emerald-400');
+}
+
+function renderTrustedAddons(trusted) {
+  trustList.innerHTML = '';
+  if (trusted.length === 0) {
+    trustList.innerHTML = '<li class="text-neutral-500">No community addons trusted yet.</li>';
+    return;
+  }
+  for (const record of trusted) {
+    const li = document.createElement('li');
+    li.className = 'flex items-center justify-between rounded border border-neutral-800 px-2 py-1.5';
+    const label = document.createElement('span');
+    label.textContent = record.addonName;
+    label.className = 'font-mono';
+    const revokeBtn = document.createElement('button');
+    revokeBtn.type = 'button';
+    revokeBtn.textContent = 'Revoke';
+    revokeBtn.className = 'text-red-400 hover:text-red-300';
+    revokeBtn.addEventListener('click', () => revokeTrust(record.addonName));
+    li.append(label, revokeBtn);
+    trustList.append(li);
+  }
+}
+
+async function loadTrustedAddons() {
+  try {
+    const res = await fetch('/api/v1/addons/trust', {
+      headers: { authorization: `Bearer ${accessToken}` },
+    });
+    if (!res.ok) return;
+    const data = await res.json();
+    renderTrustedAddons(data.trusted ?? []);
+  } catch {
+    // Non-fatal: the trust panel just stays empty/stale.
+  }
+}
+
+async function revokeTrust(addonName) {
+  try {
+    await fetch('/api/v1/addons/revoke', {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${accessToken}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({ addonName }),
+    });
+    await loadTrustedAddons();
+  } catch {
+    showTrustMessage('Could not reach the Deltix-Server.', true);
+  }
+}
+
+trustForm.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  trustMessage.classList.add('hidden');
+
+  const addonName = document.getElementById('trust-addon-name').value.trim();
+  const authorPublicKey = document.getElementById('trust-public-key').value.trim();
+
+  try {
+    const res = await fetch('/api/v1/addons/trust', {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${accessToken}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({ addonName, authorPublicKey }),
+    });
+
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      showTrustMessage(data.error ?? 'Could not trust this key.', true);
+      return;
+    }
+
+    showTrustMessage(`Trusted "${addonName}". Takes effect on next server restart.`, false);
+    trustForm.reset();
+    await loadTrustedAddons();
+  } catch {
+    showTrustMessage('Could not reach the Deltix-Server.', true);
   }
 });
 
@@ -94,6 +186,7 @@ async function restoreSessionOnLoad() {
     const data = await res.json();
     accessToken = data.accessToken;
     showSession(data.username);
+    loadTrustedAddons();
   } catch {
     // Server unreachable on load — just show the login form, same as any
     // other "not logged in" case.

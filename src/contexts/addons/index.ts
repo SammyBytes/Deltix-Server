@@ -19,6 +19,7 @@ export {
   loadAddon,
 } from './addon-loader';
 export type { AddonTrustStore } from './addon-trust-store';
+export { createAddonsRouter } from './addons.router';
 export { createAddonTrustStore } from './create-addon-trust-store';
 export {
   AddonCapabilityDeniedError,
