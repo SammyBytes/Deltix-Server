@@ -57,7 +57,6 @@ Contexts (all implemented through Fase 4):
 2. ✅ REST Control Plane & Authentication (HonoJS)
 3. ✅ Ephemeral Tickets (2m TTL) & gRPC Engine (:50051, mTLS)
 4. ✅ Dynamic Add-on Loading (TOFU trust, closed capability list, circuit breaker)
-5. ⏳ Not yet authorized/started — see `docs/decisions/` for accepted ADRs.
 
 Branching model: **trunk-based**, one branch per roadmap phase, merged into `main` once its
 test suite (unit + integration + smoke) is green.
