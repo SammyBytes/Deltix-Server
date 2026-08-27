@@ -44,3 +44,21 @@ export class TicketOperationMismatchError extends Error {
     this.name = 'TicketOperationMismatchError';
   }
 }
+
+/**
+ * Thrown when a ticket is presented for consumption (gRPC Push/Pull) but
+ * the issuing user's repo role has since been revoked or downgraded below
+ * what the ticket's operation requires. A ticket only proves that
+ * authorization held true at ISSUANCE time — without this re-check at
+ * CONSUMPTION time, revoking a user's role would not take effect until
+ * their already-issued ticket naturally expired (`DELTIX_TICKET_TTL_SECONDS`,
+ * renewable via heartbeat), which could be minutes or longer. This closes
+ * that fail-open window: every ticket consumption re-validates the
+ * caller's CURRENT repo role against the live `repo_roles` table.
+ */
+export class TicketRoleRevokedError extends Error {
+  constructor() {
+    super('Repo role required for this ticket has been revoked or downgraded since issuance');
+    this.name = 'TicketRoleRevokedError';
+  }
+}

@@ -83,6 +83,58 @@ describe('boot smoke test (real subprocess, real dolt repo)', () => {
     expect(stillRunning).toBe(true);
   });
 
+  it('exposes GET /status with version/commit/nodeEnv metadata for ops/startup diagnostics', async () => {
+    const { publicKeyBase64, privateKeyPem } = generateTestKeypair();
+    const licenseKey = signLicensePayload(buildDefaultPayload(), privateKeyPem);
+    const { privateKeyPem: jwtPrivateKeyPem, publicKeyPem: jwtPublicKeyPem } =
+      generateTestJwtKeypairPem();
+    const sessionDbPath = join(
+      await mkdtemp(join(tmpdir(), 'deltix-sessions-status-smoke-')),
+      'sessions.db',
+    );
+    const localUsers = JSON.stringify([
+      { username: 'alice', passwordHash: await hashPassword('s3cret-pass') },
+    ]);
+    const certDir = await mkdtemp(join(tmpdir(), 'deltix-grpc-certs-status-'));
+    const { certPath, keyPath } = await generateSelfSignedCert(certDir);
+    const httpPort = 41000 + Math.floor(Math.random() * 10000);
+
+    const proc = Bun.spawn(['bun', 'run', ENTRYPOINT], {
+      env: {
+        ...process.env,
+        DELTIX_LICENSE_PUBLIC_KEY: publicKeyBase64,
+        DELTIX_LICENSE_KEY: licenseKey,
+        DELTIX_DOLT_REPO_PATH: repoPath,
+        DELTIX_CLOCK_TOLERANCE_MS: '5000',
+        DELTIX_JWT_PRIVATE_KEY: jwtPrivateKeyPem,
+        DELTIX_JWT_PUBLIC_KEY: jwtPublicKeyPem,
+        DELTIX_LOCAL_USERS: localUsers,
+        DELTIX_SESSION_DB_PATH: sessionDbPath,
+        DELTIX_GRPC_TLS_CERT_PATH: certPath,
+        DELTIX_GRPC_TLS_KEY_PATH: keyPath,
+        DELTIX_GRPC_PORT: String(51000 + Math.floor(Math.random() * 10000)),
+        HTTP_PORT: String(httpPort),
+        LOG_PRETTY: 'false',
+      },
+      stdout: 'pipe',
+      stderr: 'pipe',
+    });
+
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+      const response = await fetch(`http://127.0.0.1:${httpPort}/status`);
+      expect(response.status).toBe(200);
+      const body = await response.json();
+      expect(typeof body.version).toBe('string');
+      expect(body.version.length).toBeGreaterThan(0);
+      expect(typeof body.commit).toBe('string');
+      expect(typeof body.nodeEnv).toBe('string');
+    } finally {
+      proc.kill();
+      await proc.exited;
+    }
+  });
+
   it('blocks boot (non-zero exit code) when the latest Dolt commit is dated in the future relative to the system clock', async () => {
     // Simulate clock rollback WITHOUT touching the real OS clock: record a
     // commit whose date is far in the future, so "now" (the real system time)

@@ -10,7 +10,9 @@ export {
   TicketExpiredError,
   TicketNotFoundError,
   TicketOperationMismatchError,
+  TicketRoleRevokedError,
 } from './errors';
+export type { RepoRoleVerifier } from './ticket.service';
 export { TicketService } from './ticket.service';
 export { createTransferRouter } from './transfer.router';
 export type { Ticket, TicketStatus, TransferOperation } from './types';

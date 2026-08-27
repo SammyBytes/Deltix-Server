@@ -28,6 +28,7 @@ import {
 import { createTicketService, createTransferRouter } from './contexts/transfer';
 import type { RepoProvisioningService } from './contexts/versioning';
 import { createVersioningRouter, createVersioningServices } from './contexts/versioning';
+import { getBuildInfo } from './shared/build-info';
 import { loadEnv } from './shared/env';
 import { createLogger } from './shared/logger';
 import { applySecurityMiddleware } from './shared/security-middleware';
@@ -71,6 +72,9 @@ async function backfillOrphanedRepoAdmins(
 }
 
 async function main(): Promise<void> {
+  const buildInfo = await getBuildInfo();
+  logger.info(buildInfo, 'Deltix-Server starting');
+
   const validator = createLicenseValidator();
   const result = await validator.validateOnBoot();
 
@@ -83,7 +87,7 @@ async function main(): Promise<void> {
 
   const env = loadEnv();
   const authService = await createAuthService(env);
-  const ticketService = await createTicketService(env);
+  const ticketService = await createTicketService(env, authService);
   const nasSyncService = await createNasSyncService(env);
   const addonTrustStore = await createAddonTrustStore(env);
   const {
@@ -120,6 +124,7 @@ async function main(): Promise<void> {
   );
   const app = new Hono();
   applySecurityMiddleware(app, { allowedOrigins: env.DELTIX_CORS_ALLOWED_ORIGINS });
+  app.get('/status', async (c) => c.json(await getBuildInfo()));
   app.route('/api/v1/auth', authRouter);
   app.route('/api/v1', transferRouter);
   app.route('/api/v1/storage', storageRouter);

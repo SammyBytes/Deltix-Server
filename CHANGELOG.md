@@ -5,6 +5,44 @@ All notable changes to Deltix-Server are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.3] - 2026-08-27
+
+### Security
+
+- **HIGH: revoked/downgraded repo roles did not take effect on an
+  already-issued transfer ticket.** Ticket *issuance* (`POST
+  /api/v1/transfer/push/ticket`, fixed in 0.2.2) correctly checks the
+  caller's current repo role, but the ticket itself only proved
+  authorization at that one moment. `TicketService.consumeTicket()` (called
+  from the gRPC layer's `PushSessionHandler`/`PullSessionHandler` when the
+  actual data transfer starts) never re-checked the role — a ticket minted
+  while a user was still a `writer` remained honorable at gRPC-consumption
+  time even after an admin ran `deltix roles revoke`, for as long as the
+  ticket's TTL/heartbeat window stayed open (`DELTIX_TICKET_TTL_SECONDS`,
+  sliding window). Fixed by threading a `RepoRoleVerifier` (backed by
+  `AuthService.getRepoRole()`) into `TicketService`, re-checked
+  fail-closed (`TicketRoleRevokedError`) both at ticket consumption
+  (`consumeTicket`, pre-activation) and on every heartbeat renewal
+  (`renewTicket`) — so a revoke now cuts off even a long-running,
+  already-in-flight transfer, not just future ticket issuance.
+
+### Added
+
+- `GET /status`: public, unauthenticated endpoint reporting build metadata
+  (`version` from `package.json`, `commit` resolved from
+  `DELTIX_BUILD_COMMIT` at build time or `git rev-parse` locally, and
+  `nodeEnv`). Deliberately minimal — no internal topology, dependency
+  versions, or stack traces exposed (OWASP A05: verbose banners aid
+  reconnaissance). Also logged once at boot for startup diagnostics.
+
+### Tests
+
+- Added unit coverage in `ticket.service.test.ts` for the consumption-time
+  and heartbeat-time role re-verification (revoked, downgraded, and
+  still-sufficient role scenarios).
+- Added a smoke test asserting `GET /status` returns valid version/commit/
+  nodeEnv metadata against a real booted subprocess.
+
 ## [0.2.2] - 2026-08-27
 
 ### Security

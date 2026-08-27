@@ -4,6 +4,7 @@ import {
   TicketExpiredError,
   TicketNotFoundError,
   TicketOperationMismatchError,
+  TicketRoleRevokedError,
 } from '../../../src/contexts/transfer/errors';
 import { TicketService } from '../../../src/contexts/transfer/ticket.service';
 import type { TicketStore } from '../../../src/contexts/transfer/ticket-store';
@@ -219,6 +220,82 @@ describe('TicketService', () => {
       const ticket = await service.issueTicket('alice', 'push', 'org/repo');
 
       await expect(service.closeTicket(ticket.id)).rejects.toThrow(TicketNotFoundError);
+    });
+  });
+
+  describe('consumption-time role re-verification (revoke must not survive on an already-issued ticket)', () => {
+    it('rejects gRPC consumption when the writer role was revoked after the ticket was issued', async () => {
+      let currentRole: 'reader' | 'writer' | 'admin' | null = 'writer';
+      const guarded = new TicketService(
+        store,
+        TTL_SECONDS,
+        () => clock,
+        async () => currentRole,
+      );
+
+      const ticket = await guarded.issueTicket('alice', 'push', 'org/repo');
+      // Role is revoked in the auth context AFTER the ticket was minted but
+      // BEFORE the gRPC stream actually consumes/activates it.
+      currentRole = null;
+
+      await expect(guarded.consumeTicket(ticket.id, 'push', 'org/repo')).rejects.toThrow(
+        TicketRoleRevokedError,
+      );
+
+      // The ticket must not have been left silently activated by the store
+      // before the role check failed (fail-closed, not a partial state).
+      const stored = await store.get(ticket.id);
+      expect(stored?.status).not.toBe('active');
+    });
+
+    it('rejects gRPC consumption when the role was downgraded below what the operation requires', async () => {
+      let currentRole: 'reader' | 'writer' | 'admin' | null = 'writer';
+      const guarded = new TicketService(
+        store,
+        TTL_SECONDS,
+        () => clock,
+        async () => currentRole,
+      );
+
+      const ticket = await guarded.issueTicket('alice', 'push', 'org/repo');
+      currentRole = 'reader'; // downgraded: no longer sufficient for push
+
+      await expect(guarded.consumeTicket(ticket.id, 'push', 'org/repo')).rejects.toThrow(
+        TicketRoleRevokedError,
+      );
+    });
+
+    it('still allows consumption when the role remains sufficient', async () => {
+      const guarded = new TicketService(
+        store,
+        TTL_SECONDS,
+        () => clock,
+        async () => 'writer',
+      );
+      const ticket = await guarded.issueTicket('alice', 'push', 'org/repo');
+
+      await expect(guarded.consumeTicket(ticket.id, 'push', 'org/repo')).resolves.toMatchObject({
+        id: ticket.id,
+      });
+    });
+
+    it('cuts off a long-running transfer mid-stream: heartbeat renewal fails once the role is revoked', async () => {
+      let currentRole: 'reader' | 'writer' | 'admin' | null = 'writer';
+      const guarded = new TicketService(
+        store,
+        TTL_SECONDS,
+        () => clock,
+        async () => currentRole,
+      );
+
+      const ticket = await guarded.issueTicket('alice', 'push', 'org/repo');
+      await guarded.consumeTicket(ticket.id, 'push', 'org/repo');
+
+      // Revoked mid-flight, before the next heartbeat.
+      currentRole = null;
+      clock += 30_000;
+
+      await expect(guarded.renewTicket(ticket.id)).rejects.toThrow(TicketRoleRevokedError);
     });
   });
 });

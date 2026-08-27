@@ -144,6 +144,33 @@ describe('transfer/transfer.router (integration, real HTTP requests via Hono.fet
       expect(res.status).toBe(403);
     });
 
+    it('rejects a push-ticket request immediately after the writer role was revoked (security regression guard: no stale grant must survive a revoke)', async () => {
+      const accessToken = await loginAndGetAccessToken();
+      await grantRole('alice', 'org/repo', 'writer');
+
+      const beforeRevoke = await app.request('/push/ticket', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          authorization: ['Bearer ', accessToken].join(''),
+        },
+        body: JSON.stringify({ operation: 'push', repo: 'org/repo' }),
+      });
+      expect(beforeRevoke.status).toBe(201);
+
+      await authService.revokeRepoRole('alice', 'org/repo');
+
+      const afterRevoke = await app.request('/push/ticket', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          authorization: ['Bearer ', accessToken].join(''),
+        },
+        body: JSON.stringify({ operation: 'push', repo: 'org/repo' }),
+      });
+      expect(afterRevoke.status).toBe(403);
+    });
+
     it('allows a reader to obtain a pull ticket (read-only operation)', async () => {
       const accessToken = await loginAndGetAccessToken();
       await grantRole('alice', 'org/repo', 'reader');
