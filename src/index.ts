@@ -25,6 +25,7 @@ import {
   startGrpcTransferEngine,
 } from './contexts/storage';
 import { createTicketService, createTransferRouter } from './contexts/transfer';
+import { createRepoProvisioningService, createVersioningRouter } from './contexts/versioning';
 import { loadEnv } from './shared/env';
 import { createLogger } from './shared/logger';
 import { applySecurityMiddleware } from './shared/security-middleware';
@@ -47,17 +48,20 @@ async function main(): Promise<void> {
   const ticketService = await createTicketService(env);
   const nasSyncService = await createNasSyncService(env);
   const addonTrustStore = await createAddonTrustStore(env);
+  const repoProvisioningService = await createRepoProvisioningService(env);
   const secureCookies = env.NODE_ENV === 'production';
   const authRouter = createAuthRouter(authService, secureCookies);
   const transferRouter = createTransferRouter(authService, ticketService);
   const storageRouter = createStorageRouter(authService, nasSyncService);
   const addonsRouter = createAddonsRouter(authService, addonTrustStore);
+  const versioningRouter = createVersioningRouter(authService, repoProvisioningService);
   const app = new Hono();
   applySecurityMiddleware(app, { allowedOrigins: env.DELTIX_CORS_ALLOWED_ORIGINS });
   app.route('/api/v1/auth', authRouter);
   app.route('/api/v1', transferRouter);
   app.route('/api/v1/storage', storageRouter);
   app.route('/api/v1/addons', addonsRouter);
+  app.route('/api/v1/versioning', versioningRouter);
 
   if (env.DELTIX_ADMIN_UI_ENABLED) {
     app.route('/admin', createAdminUiRouter());

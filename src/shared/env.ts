@@ -126,6 +126,13 @@ const envSchema = z.object({
   /** Consecutive runtime failures before an addon route is disabled in-memory until restart. */
   DELTIX_ADDON_MAX_CONSECUTIVE_FAILURES: z.coerce.number().int().positive().default(5),
 
+  // Real Dolt versioning (Fase 5.1): one isolated `dolt init`-ed repository
+  // per logical repoId, tracked in its own libSQL mapping table — separate
+  // from DELTIX_DOLT_REPO_PATH (Fase 1's single anti-tamper repo) and from
+  // DELTIX_NAS_SIM_PATH (Fase 3's plain-file transfer staging area).
+  DELTIX_REPO_DB_PATH: z.string().default('./data/repos.db'),
+  DELTIX_DOLT_REPOS_ROOT_PATH: z.string().default('./data/dolt-repos'),
+
   // Reserved for future phases
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
 });
