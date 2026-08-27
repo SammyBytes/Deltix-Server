@@ -115,13 +115,19 @@ export function createAuthRouter(authService: AuthService, secureCookies = true)
   });
 
   app.post('/refresh', async (c) => {
-    if (!isSameOriginOrNoOrigin(c)) {
-      return c.json({ error: 'Cross-origin request rejected' }, 403);
+    const parsed = sessionTokenBodySchema.safeParse(await c.req.json().catch(() => ({})));
+    if (!parsed.success) {
+      return c.json({ error: 'Invalid request body' }, 400);
     }
-
-    const refreshToken = getCookie(c, REFRESH_TOKEN_COOKIE);
+    const refreshToken = parsed.data.refreshToken ?? getCookie(c, REFRESH_TOKEN_COOKIE);
     if (!refreshToken) {
       return c.json({ error: 'No active session' }, 401);
+    }
+    // Only enforce the same-origin check when we actually fell back to the
+    // cookie — an explicit body refreshToken (the CLI's path, which has no
+    // cookie jar and no CSRF exposure) never goes through this check.
+    if (!parsed.data.refreshToken && !isSameOriginOrNoOrigin(c)) {
+      return c.json({ error: 'Cross-origin request rejected' }, 403);
     }
 
     try {

@@ -15,7 +15,7 @@ import { generateSelfSignedCert } from '../fixtures/tls-fixtures';
 const ENTRYPOINT = join(import.meta.dir, '..', '..', 'src', 'index.ts');
 
 async function initTempDoltRepo(): Promise<string> {
-  const repoPath = await mkdtemp(join(tmpdir(), 'deltix-dolt-repo-auth-smoke-'));
+  const repoPath = await mkdtemp(join(tmpdir(), 'deltix-dolt-repo-transfer-smoke-'));
   await $`dolt config --global --add user.name deltix-test`.quiet().nothrow();
   await $`dolt config --global --add user.email deltix-test@example.com`.quiet().nothrow();
   const init = await $`dolt --data-dir ${repoPath} init`.quiet().nothrow();
@@ -25,17 +25,18 @@ async function initTempDoltRepo(): Promise<string> {
   return repoPath;
 }
 
-describe('auth boot smoke test (real subprocess, real HTTP server, real login flow)', () => {
+describe('transfer boot smoke test (real subprocess, real HTTP server, real ticket flow)', () => {
   let repoPath: string;
-  let sessionDbPath: string;
   let httpPort: number;
   let proc: ReturnType<typeof Bun.spawn>;
+  let accessToken: string;
 
   beforeAll(async () => {
     repoPath = await initTempDoltRepo();
-    sessionDbPath = join(await mkdtemp(join(tmpdir(), 'deltix-sessions-')), 'sessions.db');
-    httpPort = 20000 + Math.floor(Math.random() * 10000);
-    const certDir = await mkdtemp(join(tmpdir(), 'deltix-grpc-certs-'));
+    const sessionDbPath = join(await mkdtemp(join(tmpdir(), 'deltix-sessions-')), 'sessions.db');
+    const ticketDbPath = join(await mkdtemp(join(tmpdir(), 'deltix-tickets-')), 'tickets.db');
+    httpPort = 24000 + Math.floor(Math.random() * 5000);
+    const certDir = await mkdtemp(join(tmpdir(), 'deltix-grpc-certs-transfer-'));
     const { certPath, keyPath } = await generateSelfSignedCert(certDir);
 
     const { publicKeyBase64, privateKeyPem } = generateTestKeypair();
@@ -57,9 +58,11 @@ describe('auth boot smoke test (real subprocess, real HTTP server, real login fl
         DELTIX_JWT_PUBLIC_KEY: jwtPublicKeyPem,
         DELTIX_LOCAL_USERS: localUsers,
         DELTIX_SESSION_DB_PATH: sessionDbPath,
+        DELTIX_TICKET_DB_PATH: ticketDbPath,
+        DELTIX_TICKET_TTL_SECONDS: '120',
         DELTIX_GRPC_TLS_CERT_PATH: certPath,
         DELTIX_GRPC_TLS_KEY_PATH: keyPath,
-        DELTIX_GRPC_PORT: String(20000 + Math.floor(Math.random() * 10000) + 10000),
+        DELTIX_GRPC_PORT: String(43000 + Math.floor(Math.random() * 10000)),
         HTTP_PORT: String(httpPort),
         LOG_PRETTY: 'false',
       },
@@ -67,8 +70,15 @@ describe('auth boot smoke test (real subprocess, real HTTP server, real login fl
       stderr: 'pipe',
     });
 
-    // Give the server a moment to boot and start listening.
     await new Promise((resolve) => setTimeout(resolve, 800));
+
+    const loginRes = await fetch(`http://127.0.0.1:${httpPort}/api/v1/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'alice', password: 's3cret-pass' }),
+    });
+    const body = (await loginRes.json()) as { accessToken: string };
+    accessToken = body.accessToken;
   });
 
   afterAll(async () => {
@@ -76,48 +86,52 @@ describe('auth boot smoke test (real subprocess, real HTTP server, real login fl
     await rm(repoPath, { recursive: true, force: true });
   });
 
-  it('serves a full login -> keep-alive -> logout flow over real HTTP', async () => {
-    const loginRes = await fetch(`http://127.0.0.1:${httpPort}/api/v1/auth/login`, {
+  it('issues an ephemeral ticket over real HTTP for an authenticated caller', async () => {
+    const res = await fetch(`http://127.0.0.1:${httpPort}/api/v1/push/ticket`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username: 'alice', password: 's3cret-pass' }),
+      headers: {
+        'Content-Type': 'application/json',
+        authorization: `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify({ operation: 'push', repo: 'org/repo' }),
     });
-    expect(loginRes.status).toBe(200);
-    const { refreshToken } = (await loginRes.json()) as { refreshToken: string };
 
-    const keepAliveRes = await fetch(`http://127.0.0.1:${httpPort}/api/v1/auth/keep-alive`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ refreshToken }),
-    });
-    expect(keepAliveRes.status).toBe(200);
-
-    const logoutRes = await fetch(`http://127.0.0.1:${httpPort}/api/v1/auth/logout`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ refreshToken }),
-    });
-    expect(logoutRes.status).toBe(200);
+    expect(res.status).toBe(201);
+    const ticket = (await res.json()) as { ticketId: string; expiresAt: number };
+    expect(ticket.ticketId).toBeString();
+    // TTL should be roughly 2 minutes out (allow generous jitter for CI).
+    expect(ticket.expiresAt).toBeGreaterThan(Date.now());
+    expect(ticket.expiresAt).toBeLessThan(Date.now() + 130_000);
   });
 
-  it('rejects invalid credentials over real HTTP without leaking details', async () => {
-    const res = await fetch(`http://127.0.0.1:${httpPort}/api/v1/auth/login`, {
+  it('rejects ticket issuance without a valid access token', async () => {
+    const res = await fetch(`http://127.0.0.1:${httpPort}/api/v1/push/ticket`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username: 'alice', password: 'totally-wrong' }),
+      body: JSON.stringify({ operation: 'push', repo: 'org/repo' }),
     });
     expect(res.status).toBe(401);
   });
 
-  it('applies baseline security headers and fails closed on CORS for a non-allow-listed origin', async () => {
-    const res = await fetch(`http://127.0.0.1:${httpPort}/api/v1/auth/login`, {
+  it('closing a ticket that was never activated returns 404 (not yet in the active state)', async () => {
+    const issueRes = await fetch(`http://127.0.0.1:${httpPort}/api/v1/push/ticket`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', Origin: 'https://not-allowed.example' },
-      body: JSON.stringify({ username: 'alice', password: 'totally-wrong' }),
+      headers: {
+        'Content-Type': 'application/json',
+        authorization: `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify({ operation: 'pull', repo: 'org/other-repo' }),
     });
+    const { ticketId } = (await issueRes.json()) as { ticketId: string };
 
-    expect(res.headers.get('x-content-type-options')).toBe('nosniff');
-    expect(res.headers.get('x-frame-options')).toBe('DENY');
-    expect(res.headers.get('access-control-allow-origin')).toBeNull();
+    const closeRes = await fetch(`http://127.0.0.1:${httpPort}/api/v1/auth/session-close`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        authorization: `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify({ ticketId }),
+    });
+    expect(closeRes.status).toBe(404);
   });
 });

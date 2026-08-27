@@ -10,6 +10,7 @@ import {
   generateTestKeypair,
   signLicensePayload,
 } from '../fixtures/license-fixtures';
+import { generateSelfSignedCert } from '../fixtures/tls-fixtures';
 
 const ENTRYPOINT = join(import.meta.dir, '..', '..', 'src', 'index.ts');
 
@@ -37,6 +38,8 @@ async function spawnServer(
     await mkdtemp(join(tmpdir(), 'deltix-admin-sessions-')),
     'sessions.db',
   );
+  const certDir = await mkdtemp(join(tmpdir(), 'deltix-grpc-certs-admin-'));
+  const { certPath, keyPath } = await generateSelfSignedCert(certDir);
 
   const proc = Bun.spawn(['bun', 'run', ENTRYPOINT], {
     env: {
@@ -49,6 +52,9 @@ async function spawnServer(
       DELTIX_JWT_PUBLIC_KEY: jwtPublicKeyPem,
       DELTIX_LOCAL_USERS: localUsers,
       DELTIX_SESSION_DB_PATH: sessionDbPath,
+      DELTIX_GRPC_TLS_CERT_PATH: certPath,
+      DELTIX_GRPC_TLS_KEY_PATH: keyPath,
+      DELTIX_GRPC_PORT: String(40000 + Math.floor(Math.random() * 10000)),
       HTTP_PORT: String(httpPort),
       LOG_PRETTY: 'false',
       ...extraEnv,
@@ -57,7 +63,7 @@ async function spawnServer(
     stderr: 'pipe',
   });
 
-  await new Promise((resolve) => setTimeout(resolve, 800));
+  await new Promise((resolve) => setTimeout(resolve, 1200));
   return proc;
 }
 

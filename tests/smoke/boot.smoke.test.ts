@@ -10,6 +10,7 @@ import {
   generateTestKeypair,
   signLicensePayload,
 } from '../fixtures/license-fixtures';
+import { generateSelfSignedCert } from '../fixtures/tls-fixtures';
 
 const ENTRYPOINT = join(import.meta.dir, '..', '..', 'src', 'index.ts');
 
@@ -47,6 +48,8 @@ describe('boot smoke test (real subprocess, real dolt repo)', () => {
     const localUsers = JSON.stringify([
       { username: 'alice', passwordHash: await hashPassword('s3cret-pass') },
     ]);
+    const certDir = await mkdtemp(join(tmpdir(), 'deltix-grpc-certs-boot-'));
+    const { certPath, keyPath } = await generateSelfSignedCert(certDir);
 
     const proc = Bun.spawn(['bun', 'run', ENTRYPOINT], {
       env: {
@@ -59,6 +62,9 @@ describe('boot smoke test (real subprocess, real dolt repo)', () => {
         DELTIX_JWT_PUBLIC_KEY: jwtPublicKeyPem,
         DELTIX_LOCAL_USERS: localUsers,
         DELTIX_SESSION_DB_PATH: sessionDbPath,
+        DELTIX_GRPC_TLS_CERT_PATH: certPath,
+        DELTIX_GRPC_TLS_KEY_PATH: keyPath,
+        DELTIX_GRPC_PORT: String(41000 + Math.floor(Math.random() * 10000)),
         HTTP_PORT: '0',
         LOG_PRETTY: 'false',
       },

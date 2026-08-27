@@ -79,6 +79,43 @@ const envSchema = z.object({
     z.boolean().default(false),
   ),
 
+  // Ephemeral transfer tickets (Fase 3: gRPC transfer engine). Reuses the
+  // same sliding-window discipline as REST auth sessions (Fase 2) — see
+  // src/contexts/transfer/ticket.service.ts.
+  DELTIX_TICKET_DB_PATH: z.string().default('./data/transfer-tickets.db'),
+  DELTIX_TICKET_TTL_SECONDS: z.coerce.number().int().positive().default(120),
+
+  // SSD staging -> NAS sync pipeline (Fase 3 continued). No physical NAS is
+  // available yet, so DELTIX_NAS_SIM_PATH points at a local folder that is
+  // treated exactly like a real NAS mount (copy + checksum + atomic
+  // rename) — swapping in a real NAS adapter later requires no changes to
+  // NasSyncService, only a new NasAdapter implementation.
+  DELTIX_TRANSFER_JOB_DB_PATH: z.string().default('./data/transfer-jobs.db'),
+  DELTIX_NAS_SIM_PATH: z.string().default('./data/nas-sim'),
+  DELTIX_NAS_SYNC_BACKOFF_BASE_MS: z.coerce.number().int().positive().default(1000),
+  DELTIX_NAS_SYNC_BACKOFF_MAX_MS: z.coerce.number().int().positive().default(60_000),
+  DELTIX_NAS_SYNC_POLL_INTERVAL_MS: z.coerce.number().int().positive().default(5000),
+  DELTIX_TRANSFER_JOB_MAX_RETRIES: z.coerce.number().int().positive().default(5),
+
+  // gRPC Transfer Engine (Fase 3 continued): Push/Pull/Heartbeat wire
+  // protocol. ALWAYS TLS — the server never binds a plaintext listener,
+  // so cert/key paths are required (no insecure default). Generate a
+  // local dev cert with `bun run scripts/generate-dev-tls-certs.ts`.
+  DELTIX_GRPC_PORT: z.coerce.number().int().positive().default(50051),
+  DELTIX_GRPC_TLS_CERT_PATH: z
+    .string()
+    .min(
+      1,
+      'DELTIX_GRPC_TLS_CERT_PATH is required (PEM cert chain, see scripts/generate-dev-tls-certs.ts for local dev)',
+    ),
+  DELTIX_GRPC_TLS_KEY_PATH: z
+    .string()
+    .min(
+      1,
+      'DELTIX_GRPC_TLS_KEY_PATH is required (PEM private key, see scripts/generate-dev-tls-certs.ts for local dev)',
+    ),
+  DELTIX_STAGING_ROOT_PATH: z.string().default('./data/staging'),
+
   // Reserved for future phases
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
 });
