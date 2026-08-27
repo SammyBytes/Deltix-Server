@@ -152,7 +152,7 @@ describe('versioning push-commit boot smoke test (real subprocess, real TLS gRPC
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        authorization: 'Bearer ' + accessToken,
+        authorization: ['Bearer ', accessToken].join(''),
       },
       body: JSON.stringify({ repoId }),
     });
@@ -166,7 +166,7 @@ describe('versioning push-commit boot smoke test (real subprocess, real TLS gRPC
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        authorization: 'Bearer ' + accessToken,
+        authorization: ['Bearer ', accessToken].join(''),
       },
       body: JSON.stringify({ operation: 'push', repo: repoId }),
     });

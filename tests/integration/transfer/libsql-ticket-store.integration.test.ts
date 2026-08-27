@@ -33,7 +33,7 @@ describe('transfer/libsql-ticket-store (integration, real libSQL file)', () => {
     await store.create(ticket);
 
     const stored = await store.get(ticket.id);
-    expect(stored).toEqual(ticket);
+    expect(stored).toEqual({ ...ticket, syncOptions: null });
   });
 
   it('returns null for an unknown ticket id', async () => {

@@ -37,3 +37,10 @@ export class CommitFailedError extends Error {
     this.name = 'CommitFailedError';
   }
 }
+
+export class SyncPreferenceConflictError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'SyncPreferenceConflictError';
+  }
+}

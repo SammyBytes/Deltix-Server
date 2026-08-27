@@ -30,6 +30,7 @@ import {
   PullSessionHandler,
 } from './pull-session-handler';
 import {
+  type OnBeforePush,
   type OnPushCommitted,
   PushSessionAbortedError,
   PushSessionHandler,
@@ -51,6 +52,7 @@ export interface GrpcTransferServerOptions {
   maxRetries: number;
   tls: GrpcTlsConfig;
   onPushCommitted?: OnPushCommitted;
+  onBeforePush?: OnBeforePush;
 }
 
 function loadTransferEngineDefinition() {
@@ -84,6 +86,7 @@ export function createGrpcTransferServer(options: GrpcTransferServerOptions): gr
         options.maxRetries,
         undefined,
         options.onPushCommitted,
+        options.onBeforePush,
       );
       let headerReceived = false;
       let aborted = false;

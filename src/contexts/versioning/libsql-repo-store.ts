@@ -7,15 +7,12 @@ import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { type Client, createClient } from '@libsql/client';
 import type { RepoStore } from './repo-store';
-import type { RepoRecord } from './types';
+import type { RepoRecord, RepoSyncPreferenceSummary } from './types';
 
 export class LibsqlRepoStore implements RepoStore {
   private readonly client: Client;
 
   constructor(dbPath: string) {
-    // libSQL does not create missing parent directories itself — ensure it
-    // exists up front so a fresh deployment/test environment doesn't need
-    // to pre-create it manually.
     mkdirSync(dirname(dbPath), { recursive: true });
     this.client = createClient({ url: `file:${dbPath}` });
   }
@@ -27,6 +24,16 @@ export class LibsqlRepoStore implements RepoStore {
         dolt_path TEXT NOT NULL,
         created_at INTEGER NOT NULL,
         created_by TEXT NOT NULL
+      )
+    `);
+    await this.client.execute(`
+      CREATE TABLE IF NOT EXISTS repo_sync_preferences (
+        repo_id TEXT PRIMARY KEY,
+        mode TEXT NOT NULL,
+        requested_tables_json TEXT,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        FOREIGN KEY (repo_id) REFERENCES repos(repo_id) ON DELETE CASCADE
       )
     `);
   }
@@ -53,6 +60,48 @@ export class LibsqlRepoStore implements RepoStore {
       `SELECT repo_id, dolt_path, created_at, created_by FROM repos`,
     );
     return result.rows.map(rowToRecord);
+  }
+
+  async getSyncPreference(repoId: string): Promise<RepoSyncPreferenceSummary | null> {
+    const result = await this.client.execute({
+      sql: `SELECT mode, requested_tables_json FROM repo_sync_preferences WHERE repo_id = ?`,
+      args: [repoId],
+    });
+    const row = result.rows[0];
+    if (!row) {
+      return null;
+    }
+    return {
+      mode: row.mode as RepoSyncPreferenceSummary['mode'],
+      requestedTables:
+        typeof row.requested_tables_json === 'string'
+          ? ((JSON.parse(row.requested_tables_json) as string[] | null) ?? null)
+          : null,
+    };
+  }
+
+  async upsertSyncPreference(params: {
+    repoId: string;
+    mode: RepoSyncPreferenceSummary['mode'];
+    requestedTables: string[] | null;
+    createdAt: number;
+    updatedAt: number;
+  }): Promise<void> {
+    await this.client.execute({
+      sql: `INSERT INTO repo_sync_preferences (repo_id, mode, requested_tables_json, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(repo_id) DO UPDATE SET
+              mode = excluded.mode,
+              requested_tables_json = excluded.requested_tables_json,
+              updated_at = excluded.updated_at`,
+      args: [
+        params.repoId,
+        params.mode,
+        params.requestedTables ? JSON.stringify(params.requestedTables) : null,
+        params.createdAt,
+        params.updatedAt,
+      ],
+    });
   }
 }
 

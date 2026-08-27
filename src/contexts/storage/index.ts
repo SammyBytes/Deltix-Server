@@ -20,6 +20,6 @@ export {
 } from './grpc-transfer-server';
 export { NasSyncService } from './nas-sync.service';
 export { NasSyncWorker } from './nas-sync.worker';
-export type { OnPushCommitted } from './push-session-handler';
+export type { OnBeforePush, OnPushCommitted } from './push-session-handler';
 export { createStorageRouter } from './storage.router';
 export type { TransferJob, TransferJobStatus } from './types';

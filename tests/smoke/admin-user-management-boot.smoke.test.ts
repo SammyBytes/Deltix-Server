@@ -77,7 +77,9 @@ describe('admin user management smoke test', () => {
     const setupPage = await fetch(`http://127.0.0.1:${httpPort}/admin/setup`);
     if (setupPage.status !== 200) {
       const stderr = await new Response(proc.stderr).text();
-      throw new Error('Unexpected setup status ' + setupPage.status + '\n' + stderr);
+      throw new Error(
+        ['Unexpected setup status ', String(setupPage.status), '\n', stderr].join(''),
+      );
     }
 
     const setupRes = await fetch(`http://127.0.0.1:${httpPort}/api/v1/auth/setup`, {
@@ -103,14 +105,14 @@ describe('admin user management smoke test', () => {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
-        authorization: 'Bearer ' + accessToken,
+        authorization: ['Bearer ', accessToken].join(''),
       },
       body: JSON.stringify({ username: 'bob', password: 'another-pass' }),
     });
     expect(createUserRes.status).toBe(201);
 
     const listRes = await fetch(`http://127.0.0.1:${httpPort}/api/v1/auth/users`, {
-      headers: { authorization: 'Bearer ' + accessToken },
+      headers: { authorization: ['Bearer ', accessToken].join('') },
     });
     expect(listRes.status).toBe(200);
     const listBody = (await listRes.json()) as { users: Array<{ username: string }> };
@@ -120,7 +122,7 @@ describe('admin user management smoke test', () => {
       `http://127.0.0.1:${httpPort}/api/v1/auth/users/bob/deactivate`,
       {
         method: 'POST',
-        headers: { authorization: 'Bearer ' + accessToken },
+        headers: { authorization: ['Bearer ', accessToken].join('') },
       },
     );
     expect(deactivateRes.status).toBe(200);

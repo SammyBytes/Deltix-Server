@@ -12,7 +12,6 @@ import { TicketService } from '../../../src/contexts/transfer/ticket.service';
 import type { TicketStore } from '../../../src/contexts/transfer/ticket-store';
 import type { Ticket, TransferOperation } from '../../../src/contexts/transfer/types';
 
-/** Same in-memory ticket store double used in ticket.service.test.ts. */
 class InMemoryTicketStore implements TicketStore {
   tickets = new Map<string, Ticket>();
 
@@ -92,8 +91,12 @@ describe('PushSessionHandler', () => {
     stagingRoot = await mkdtemp(join(tmpdir(), 'deltix-push-session-'));
   });
 
-  async function issueTicket(operation: TransferOperation = 'push', repo = 'org/repo') {
-    return ticketService.issueTicket('alice', operation, repo);
+  async function issueTicket(
+    operation: TransferOperation = 'push',
+    repo = 'org/repo',
+    syncOptions?: Ticket['syncOptions'],
+  ) {
+    return ticketService.issueTicket('alice', operation, repo, syncOptions);
   }
 
   it('rejects onHeader with an unknown ticket', async () => {
@@ -146,6 +149,7 @@ describe('PushSessionHandler', () => {
     const expected = createHash('sha256').update('hello world').digest('hex');
     expect(result.checksum).toBe(expected);
     expect(result.bytesReceived).toBe(11);
+    expect(result.dryRun).toBe(false);
   });
 
   it('creates a STAGED TransferJob on finish, pointing at the written staging file', async () => {
@@ -162,6 +166,72 @@ describe('PushSessionHandler', () => {
 
     const onDisk = await readFile(job?.stagingPath ?? '', 'utf8');
     expect(onDisk).toBe('data');
+  });
+
+  it('passes sync options into the pre-push validation hook before creating the transfer job', async () => {
+    const ticket = await issueTicket('push', 'org/repo', {
+      mode: 'schema_only',
+      tables: ['orders'],
+      dryRun: false,
+    });
+    const calls: Array<{
+      repo: string;
+      username: string;
+      stagingPath: string;
+      syncOptions: unknown;
+    }> = [];
+    const onBeforePush = mock(async (params: (typeof calls)[number]) => {
+      calls.push(params);
+      return {
+        repo: params.repo,
+        username: params.username,
+        stagingPath: params.stagingPath,
+        dryRun: false,
+      };
+    });
+    const handler = new PushSessionHandler(
+      ticketService,
+      jobStore,
+      stagingRoot,
+      5,
+      () => 1000,
+      async () => {},
+      onBeforePush,
+    );
+    await handler.onHeader(ticket.id, 'push', 'org/repo');
+    handler.onChunk(new TextEncoder().encode('data'));
+
+    await handler.finish();
+
+    expect(onBeforePush).toHaveBeenCalledTimes(1);
+    expect(calls[0]?.syncOptions).toEqual({
+      mode: 'schema_only',
+      tables: ['orders'],
+      dryRun: false,
+    });
+  });
+
+  it('skips transfer-job creation for dry-run pushes while still closing the ticket', async () => {
+    const ticket = await issueTicket('push', 'org/repo', { dryRun: true });
+    const handler = new PushSessionHandler(
+      ticketService,
+      jobStore,
+      stagingRoot,
+      5,
+      () => 1000,
+      async () => {},
+      async ({ repo, username, stagingPath }) => ({ repo, username, stagingPath, dryRun: true }),
+    );
+    await handler.onHeader(ticket.id, 'push', 'org/repo');
+    handler.onChunk(new TextEncoder().encode('data'));
+
+    const result = await handler.finish();
+
+    expect(result.jobId).toBe('dry-run');
+    expect(result.dryRun).toBe(true);
+    expect(jobStore.jobs).toHaveLength(0);
+    const stored = await ticketStore.get(ticket.id);
+    expect(stored?.status).toBe('closed');
   });
 
   it('invokes onPushCommitted with repo/username/jobId/checksum after a successful finish', async () => {
@@ -240,9 +310,6 @@ describe('PushSessionHandler', () => {
     handler.onChunk(new TextEncoder().encode('x'));
     await handler.finish();
 
-    // After finish(), the ticket is closed -> a subsequent heartbeat call
-    // against the SAME handler instance should fail (this simulates a
-    // stray/late heartbeat arriving after the stream ended).
     await expect(handler.onHeartbeat()).rejects.toThrow(PushSessionAbortedError);
   });
 

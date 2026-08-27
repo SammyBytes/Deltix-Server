@@ -48,8 +48,33 @@ into `dolt sql -q` are either server-generated (UUID/hex, shape-validated
 before interpolation) or sanitized (author name), never raw, unsanitized
 user input.
 
+## Fase 5.8 — sync preferences
+
+`LibsqlRepoStore` now persists per-repo sync preferences in the same libSQL
+DB as the `repoId <-> doltPath` mapping. `SyncPreferenceService` is the
+server-side source of truth for:
+
+- `schema_only` vs `schema_and_data` mode
+- requested table subsets per repo
+- dry-run previews of FK-closure expansion
+- fail-closed rejection when a requested subset excludes FK-required tables
+
+Foreign-key closure is always recomputed server-side from Dolt via
+`dolt sql` against `information_schema.KEY_COLUMN_USAGE`; the client may
+propose overrides on the transfer-ticket request, but the server never
+trusts precomputed client closure data. The REST API is:
+
+- `GET /api/v1/versioning/repos/:repoId/sync-preferences`
+- `PUT /api/v1/versioning/repos/:repoId/sync-preferences`
+- `POST /api/v1/versioning/repos/:repoId/sync-preferences/dry-run`
+
+During gRPC Push, `storage` invokes an injected `onBeforePush` hook (wired
+from `src/index.ts`) so `versioning` can revalidate any ticket override
+before a transfer job is committed, without breaking the cross-context ACL
+boundary.
+
 ## Not yet implemented
 
-- Branching (`dolt branch`/`checkout`), merge/conflicts, log/diff,
-  per-repo/branch authorization, Admin UI user management, and sync
-  preferences — see the ADR for the full Fase 5 sub-phase plan and order.
+- Branching (`dolt branch`/`checkout`), merge/conflicts, log/diff, and
+  per-repo/branch authorization — see the ADR for the remaining Fase 5
+  sub-phases.

@@ -1,7 +1,7 @@
 # ADR 0002: Fase 5 — Versionado Real sobre Dolt, Gestión de Usuarios en Admin UI y
 # Preferencias de Sincronización
 
-- **Status**: **Draft** — plan de alcance, código NO autorizado a empezar todavía.
+- **Status**: **Fase 5.8 completada parcialmente en código** — mantener este ADR sincronizado con la implementación vigente.
 - **Date**: 2026-08-27 (Draft)
 - **Owner**: @SammyBytes
 - **Scope**: Deltix-Server (contextos `versioning`, `auth`, `admin-ui`) y Deltix-Client
@@ -48,7 +48,7 @@ mismo patrón que Fases 1-4. Ninguna sub-fase empieza sin luz verde explícita d
 | 5.5 | **Historial / diff navegable** | `dolt_log` / `dolt_diff` (mismo patrón de lectura ya usado en `licensing/dolt-commit-log.reader.ts`) expuestos como `deltix log` / `deltix diff` | Server, Client |
 | 5.6 | **Autorización por repo/branch** | Extensión de `auth` con ACL nueva hacia `versioning` (rol simple por repo: lector/escritor/admin — NO RBAC granular todavía, mantener simple) | Server |
 | **5.7** | **Gestión de usuarios en Admin UI** (nuevo, pedido 2026-08-27) | CRUD visual de usuarios (crear/editar/desactivar/eliminar), listado de sesiones activas por usuario, setup inicial de primer admin | Server (admin-ui + auth) |
-| **5.8** | **Preferencias de sincronización** (nuevo, pedido 2026-08-27) | Selección de "solo schema" vs "schema + datos"; selección de tablas a sincronizar con expansión automática por FK | Server (versioning), Client (flags de `push`) |
+| **5.8** | **Preferencias de sincronización** (nuevo, pedido 2026-08-27) | Selección de "solo schema" vs "schema + datos"; selección de tablas a sincronizar con expansión automática por FK y dry-run server-side | Server (versioning), Client (flags de `push`) |
 
 Las sub-fases 5.7 y 5.8 dependen de 5.1-5.2 (necesitan un repo Dolt real y un modelo
 de commit para tener sentido), por eso van después en el orden de ejecución aunque se
@@ -168,7 +168,7 @@ modelo de usuarios ya existe de verdad)**.
 ### Preguntas abiertas para antes de codificar
 - ¿Debe existir un modo de previsualización (`deltix push --dry-run`) que muestre
   qué tablas adicionales se arrastrarían por FK antes de confirmar la operación?
-  → Propuesta: sí, de bajo costo de implementar y buena UX/seguridad.
+  → Resuelto: sí. Se implementa preview/dry-run server-side para devolver el cierre FK calculado sin ejecutar el push real.
 
 ---
 
@@ -213,4 +213,4 @@ modelo de usuarios ya existe de verdad)**.
 | 5.5 | ⏳ No iniciada |
 | 5.6 | ⏳ No iniciada |
 | 5.7 | ✅ Completa — `contexts/auth` migra a `LibsqlUserStore` con bootstrap env opcional + fallback legacy `DELTIX_LOCAL_USERS`; `AuthService` agrega setup inicial race-safe, CRUD/soft-delete/hard-delete con analítica de sesiones activas, y Admin UI incorpora `/admin/setup` + panel `/admin/users` con tours driver.js independientes. |
-| 5.8 | ⏳ No iniciada |
+| 5.8 | ✅ Completa — `contexts/versioning` ahora persiste preferencias por repo en la misma libSQL de `repos`, expone `GET/PUT /api/v1/versioning/repos/:repoId/sync-preferences` y `POST /api/v1/versioning/repos/:repoId/sync-preferences/dry-run`, y revalida server-side el cierre transitivo de FKs antes de aceptar overrides por ticket/push. |

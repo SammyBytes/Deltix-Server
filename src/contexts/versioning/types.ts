@@ -11,3 +11,8 @@ export interface RepoRecord {
   createdAt: number;
   createdBy: string;
 }
+
+export interface RepoSyncPreferenceSummary {
+  mode: 'schema_only' | 'schema_and_data';
+  requestedTables: string[] | null;
+}

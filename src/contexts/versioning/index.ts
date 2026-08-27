@@ -11,16 +11,28 @@ export type { VersioningServices } from './create-versioning-services';
 export { createVersioningServices } from './create-versioning-services';
 export { runDoltInit } from './dolt-cli';
 export { runDoltCommit } from './dolt-commit-cli';
+export { assertSafeTableName, readForeignKeyEdges } from './dolt-foreign-key-reader';
 export {
   CommitFailedError,
   InvalidRepoIdError,
   RepoAlreadyProvisionedError,
   RepoNotFoundError,
   RepoProvisioningFailedError,
+  SyncPreferenceConflictError,
 } from './errors';
 export { LibsqlRepoStore } from './libsql-repo-store';
 export type { RunDoltInit } from './repo-provisioning.service';
 export { RepoProvisioningService } from './repo-provisioning.service';
 export type { RepoStore } from './repo-store';
-export type { RepoRecord } from './types';
+export { SyncPreferenceService } from './sync-preference.service';
+export type {
+  ForeignKeyEdge,
+  PushSyncOptions,
+  PushSyncValidationResult,
+  RepoSyncPreferenceRecord,
+  SyncMode,
+  SyncPlan,
+  SyncPlanRequest,
+} from './sync-preference-types';
+export type { RepoRecord, RepoSyncPreferenceSummary } from './types';
 export { createVersioningRouter } from './versioning.router';

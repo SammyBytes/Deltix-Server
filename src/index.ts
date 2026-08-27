@@ -48,13 +48,18 @@ async function main(): Promise<void> {
   const ticketService = await createTicketService(env);
   const nasSyncService = await createNasSyncService(env);
   const addonTrustStore = await createAddonTrustStore(env);
-  const { repoProvisioningService, commitService } = await createVersioningServices(env);
+  const { repoProvisioningService, commitService, syncPreferenceService } =
+    await createVersioningServices(env);
   const secureCookies = env.NODE_ENV === 'production';
   const authRouter = createAuthRouter(authService, secureCookies);
   const transferRouter = createTransferRouter(authService, ticketService);
   const storageRouter = createStorageRouter(authService, nasSyncService);
   const addonsRouter = createAddonsRouter(authService, addonTrustStore);
-  const versioningRouter = createVersioningRouter(authService, repoProvisioningService);
+  const versioningRouter = createVersioningRouter(
+    authService,
+    repoProvisioningService,
+    syncPreferenceService,
+  );
   const app = new Hono();
   applySecurityMiddleware(app, { allowedOrigins: env.DELTIX_CORS_ALLOWED_ORIGINS });
   app.route('/api/v1/auth', authRouter);
@@ -97,6 +102,33 @@ async function main(): Promise<void> {
       if (commitHash) {
         logger.info({ repo, username, jobId, commitHash }, 'Recorded real Dolt commit for push');
       }
+    },
+    async ({ repo, username, stagingPath, syncOptions }) => {
+      const parsed = (syncOptions ?? null) as {
+        mode?: 'schema_only' | 'schema_and_data';
+        tables?: string[] | null;
+        dryRun?: boolean;
+      } | null;
+      const shouldValidateSync = await repoProvisioningService.get(repo);
+      if (!shouldValidateSync) {
+        return { repo, username, stagingPath, dryRun: parsed?.dryRun ?? false };
+      }
+      const validation = await syncPreferenceService.validatePushOptions(repo, {
+        mode: parsed?.mode,
+        tables: parsed?.tables ?? undefined,
+        dryRun: parsed?.dryRun ?? false,
+      });
+      logger.info(
+        {
+          repo,
+          username,
+          mode: validation.mode,
+          dryRun: validation.dryRun,
+          requestedTables: validation.requestedTables,
+        },
+        'Validated push sync preferences before staging commit',
+      );
+      return { repo, username, stagingPath, dryRun: validation.dryRun };
     },
   );
   logger.info(

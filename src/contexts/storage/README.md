@@ -72,11 +72,21 @@ already safely staged and will still reach the NAS via the independent
 sync pipeline above; losing one version-history commit is recoverable,
 losing staged data is not.
 
+## Sync-preference enforcement hook (Fase 5.8)
+
+`PushSessionHandler` now accepts an injected `onBeforePush` callback in the
+same style as `onPushCommitted`. `src/index.ts` wires this callback to the
+`versioning` context so sync-preference overrides carried by the push ticket
+can be revalidated server-side before the `TransferJob` row is created. This
+keeps `storage` free of direct `versioning` imports while enforcing the
+fail-closed rule that a push with an invalid FK-incomplete subset must never
+proceed silently.
+
+If the callback marks the request as `dryRun`, the push session closes the
+ticket and returns success metadata without creating a `TransferJob`, so the
+preview path never writes to NAS.
+
 ## Not yet implemented
 
 - Wiring `NasSyncWorker`'s failure callback to an actual alerting/
   notification channel (currently only logs via `pino`).
-- The gRPC engine that actually writes to SSD staging in the first place
-  (lands alongside `contexts/transfer`'s gRPC server) — this context
-  currently assumes a `TransferJob` row already exists once staging is
-  done.

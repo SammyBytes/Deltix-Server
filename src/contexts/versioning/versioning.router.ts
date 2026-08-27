@@ -1,24 +1,25 @@
-/**
- * HonoJS presentation layer for repo provisioning (Fase 5.1): lets an
- * authenticated user create a new Dolt-backed repo and list/inspect
- * existing ones. Same auth discipline as every other management endpoint
- * in this project: requires a valid Fase 2 JWT access token.
- *
- * Fase 5.6 will extend this with per-repo/branch authorization; for 5.1
- * any authenticated user may provision a repo, same current-state
- * coarseness as the addons trust endpoints.
- */
 import { Hono } from 'hono';
 import { z } from 'zod';
 import { createLogger } from '../../shared/logger';
 import type { AuthService } from '../auth';
-import { InvalidRepoIdError, RepoAlreadyProvisionedError } from './errors';
+import {
+  InvalidRepoIdError,
+  RepoAlreadyProvisionedError,
+  RepoNotFoundError,
+  SyncPreferenceConflictError,
+} from './errors';
 import type { RepoProvisioningService } from './repo-provisioning.service';
+import type { SyncPreferenceService } from './sync-preference.service';
 
 const logger = createLogger('http:versioning');
 
 const provisionRequestSchema = z.object({
   repoId: z.string().min(1).max(64),
+});
+
+const syncRequestSchema = z.object({
+  mode: z.enum(['schema_only', 'schema_and_data']),
+  tables: z.array(z.string().min(1).max(128)).max(256).nullable().optional(),
 });
 
 async function authenticate(
@@ -40,9 +41,52 @@ async function authenticate(
   }
 }
 
+async function requireUsername(
+  c: Parameters<Hono['get']>[1] extends (arg: infer T) => unknown ? T : never,
+  authService: AuthService,
+) {
+  const username = await authenticate(c.req.header('authorization'), authService);
+  if (!username) {
+    return c.json({ error: 'Unauthorized' }, 401);
+  }
+  return username;
+}
+
+function parseSyncBody(
+  parsed: z.SafeParseReturnType<
+    unknown,
+    { mode: 'schema_only' | 'schema_and_data'; tables?: string[] | null | undefined }
+  >,
+) {
+  if (!parsed.success) {
+    return {
+      ok: false as const,
+      response: { error: 'Invalid request body', details: parsed.error.issues },
+    };
+  }
+  return {
+    ok: true as const,
+    data: { mode: parsed.data.mode, tables: parsed.data.tables ?? null },
+  };
+}
+
+function handleSyncError(err: unknown, fallback: string) {
+  if (err instanceof InvalidRepoIdError) {
+    return { body: { error: err.message }, status: 400 };
+  }
+  if (err instanceof RepoNotFoundError) {
+    return { body: { error: err.message }, status: 404 };
+  }
+  if (err instanceof SyncPreferenceConflictError) {
+    return { body: { error: err.message }, status: 409 };
+  }
+  return { body: { error: fallback }, status: 500 };
+}
+
 export function createVersioningRouter(
   authService: AuthService,
   provisioningService: RepoProvisioningService,
+  syncPreferenceService?: SyncPreferenceService,
 ): Hono {
   const app = new Hono();
 
@@ -95,6 +139,64 @@ export function createVersioningRouter(
     }
     return c.json({ repo }, 200);
   });
+
+  if (syncPreferenceService) {
+    app.get('/repos/:repoId/sync-preferences', async (c) => {
+      const username = await requireUsername(c, authService);
+      if (typeof username !== 'string') {
+        return username;
+      }
+      try {
+        const preference = await syncPreferenceService.get(c.req.param('repoId'));
+        return c.json({ preference }, 200);
+      } catch (err) {
+        const handled = handleSyncError(err, 'Failed to read sync preference');
+        return c.json(handled.body, handled.status as 400 | 404 | 409 | 500);
+      }
+    });
+
+    app.put('/repos/:repoId/sync-preferences', async (c) => {
+      const username = await requireUsername(c, authService);
+      if (typeof username !== 'string') {
+        return username;
+      }
+      const parsed = parseSyncBody(
+        syncRequestSchema.safeParse(await c.req.json().catch(() => null)),
+      );
+      if (!parsed.ok) {
+        return c.json(parsed.response, 400);
+      }
+      try {
+        const preference = await syncPreferenceService.upsert(c.req.param('repoId'), parsed.data);
+        return c.json({ preference }, 200);
+      } catch (err) {
+        logger.error({ err, repoId: c.req.param('repoId') }, 'Failed to save sync preference');
+        const handled = handleSyncError(err, 'Failed to save sync preference');
+        return c.json(handled.body, handled.status as 400 | 404 | 409 | 500);
+      }
+    });
+
+    app.post('/repos/:repoId/sync-preferences/dry-run', async (c) => {
+      const username = await requireUsername(c, authService);
+      if (typeof username !== 'string') {
+        return username;
+      }
+      const parsed = parseSyncBody(
+        syncRequestSchema.safeParse(await c.req.json().catch(() => null)),
+      );
+      if (!parsed.ok) {
+        return c.json(parsed.response, 400);
+      }
+      try {
+        const plan = await syncPreferenceService.preview(c.req.param('repoId'), parsed.data);
+        return c.json({ plan }, 200);
+      } catch (err) {
+        logger.error({ err, repoId: c.req.param('repoId') }, 'Failed to preview sync preference');
+        const handled = handleSyncError(err, 'Failed to preview sync preference');
+        return c.json(handled.body, handled.status as 400 | 404 | 409 | 500);
+      }
+    });
+  }
 
   return app;
 }

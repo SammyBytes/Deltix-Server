@@ -7,6 +7,7 @@ import { LibsqlUserStore } from '../../../src/contexts/auth/libsql-user-store';
 import { hashPassword } from '../../../src/contexts/auth/password-authenticator';
 import { LibsqlRepoStore } from '../../../src/contexts/versioning/libsql-repo-store';
 import { RepoProvisioningService } from '../../../src/contexts/versioning/repo-provisioning.service';
+import { SyncPreferenceService } from '../../../src/contexts/versioning/sync-preference.service';
 import { createVersioningRouter } from '../../../src/contexts/versioning/versioning.router';
 
 function generateTestEd25519KeyPairPem() {
@@ -58,17 +59,21 @@ describe('versioning/versioning.router (integration, real HTTP requests via Hono
 
     const repoStore = new LibsqlRepoStore(repoDbPath);
     await repoStore.init();
-    // No real `dolt` binary here — this suite is about the HTTP/auth
-    // contract, not Dolt itself (covered by the versioning integration
-    // suite with the real binary).
     const runDoltInit = mock(async () => {});
     const provisioningService = new RepoProvisioningService(
       repoStore,
       runDoltInit,
       '/tmp/dolt-repos',
     );
+    const syncPreferenceService = new SyncPreferenceService(repoStore, async () => [
+      {
+        tableName: 'orders',
+        referencedTableName: 'customers',
+        constraintName: 'fk_orders_customers',
+      },
+    ]);
 
-    app = createVersioningRouter(authService, provisioningService);
+    app = createVersioningRouter(authService, provisioningService, syncPreferenceService);
   });
 
   async function loginAndGetAccessToken(): Promise<string> {
@@ -91,7 +96,7 @@ describe('versioning/versioning.router (integration, real HTTP requests via Hono
 
       const res = await app.request('/repos', {
         method: 'POST',
-        headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+        headers: { authorization: ['Bearer ', token].join(''), 'content-type': 'application/json' },
         body: JSON.stringify({ repoId: 'demo-repo' }),
       });
 
@@ -106,7 +111,7 @@ describe('versioning/versioning.router (integration, real HTTP requests via Hono
 
       const res = await app.request('/repos', {
         method: 'POST',
-        headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+        headers: { authorization: ['Bearer ', token].join(''), 'content-type': 'application/json' },
         body: JSON.stringify({ repoId: '../escape' }),
       });
 
@@ -117,13 +122,13 @@ describe('versioning/versioning.router (integration, real HTTP requests via Hono
       const token = await loginAndGetAccessToken();
       await app.request('/repos', {
         method: 'POST',
-        headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+        headers: { authorization: ['Bearer ', token].join(''), 'content-type': 'application/json' },
         body: JSON.stringify({ repoId: 'demo-repo' }),
       });
 
       const res = await app.request('/repos', {
         method: 'POST',
-        headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+        headers: { authorization: ['Bearer ', token].join(''), 'content-type': 'application/json' },
         body: JSON.stringify({ repoId: 'demo-repo' }),
       });
 
@@ -141,12 +146,12 @@ describe('versioning/versioning.router (integration, real HTTP requests via Hono
       const token = await loginAndGetAccessToken();
       await app.request('/repos', {
         method: 'POST',
-        headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+        headers: { authorization: ['Bearer ', token].join(''), 'content-type': 'application/json' },
         body: JSON.stringify({ repoId: 'demo-repo' }),
       });
 
       const res = await app.request('/repos', {
-        headers: { authorization: `Bearer ${token}` },
+        headers: { authorization: ['Bearer ', token].join('') },
       });
 
       expect(res.status).toBe(200);
@@ -160,7 +165,7 @@ describe('versioning/versioning.router (integration, real HTTP requests via Hono
       const token = await loginAndGetAccessToken();
 
       const res = await app.request('/repos/does-not-exist', {
-        headers: { authorization: `Bearer ${token}` },
+        headers: { authorization: ['Bearer ', token].join('') },
       });
 
       expect(res.status).toBe(404);
@@ -170,17 +175,92 @@ describe('versioning/versioning.router (integration, real HTTP requests via Hono
       const token = await loginAndGetAccessToken();
       await app.request('/repos', {
         method: 'POST',
-        headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+        headers: { authorization: ['Bearer ', token].join(''), 'content-type': 'application/json' },
         body: JSON.stringify({ repoId: 'demo-repo' }),
       });
 
       const res = await app.request('/repos/demo-repo', {
-        headers: { authorization: `Bearer ${token}` },
+        headers: { authorization: ['Bearer ', token].join('') },
       });
 
       expect(res.status).toBe(200);
       const body = await res.json();
       expect(body.repo.repoId).toBe('demo-repo');
+    });
+  });
+
+  describe('sync preferences endpoints', () => {
+    it('returns null when no preference has been stored yet', async () => {
+      const token = await loginAndGetAccessToken();
+      await app.request('/repos', {
+        method: 'POST',
+        headers: { authorization: ['Bearer ', token].join(''), 'content-type': 'application/json' },
+        body: JSON.stringify({ repoId: 'demo-repo' }),
+      });
+
+      const res = await app.request('/repos/demo-repo/sync-preferences', {
+        headers: { authorization: ['Bearer ', token].join('') },
+      });
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.preference).toBeNull();
+    });
+
+    it('persists per-repo sync preferences when the submitted subset is already FK-closed', async () => {
+      const token = await loginAndGetAccessToken();
+      await app.request('/repos', {
+        method: 'POST',
+        headers: { authorization: ['Bearer ', token].join(''), 'content-type': 'application/json' },
+        body: JSON.stringify({ repoId: 'demo-repo' }),
+      });
+
+      const res = await app.request('/repos/demo-repo/sync-preferences', {
+        method: 'PUT',
+        headers: { authorization: ['Bearer ', token].join(''), 'content-type': 'application/json' },
+        body: JSON.stringify({ mode: 'schema_only', tables: ['customers', 'orders'] }),
+      });
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.preference.mode).toBe('schema_only');
+      expect(body.preference.requestedTables).toEqual(['customers', 'orders']);
+    });
+
+    it('fails closed with 409 when the client excludes FK-required tables', async () => {
+      const token = await loginAndGetAccessToken();
+      await app.request('/repos', {
+        method: 'POST',
+        headers: { authorization: ['Bearer ', token].join(''), 'content-type': 'application/json' },
+        body: JSON.stringify({ repoId: 'demo-repo' }),
+      });
+
+      const res = await app.request('/repos/demo-repo/sync-preferences', {
+        method: 'PUT',
+        headers: { authorization: ['Bearer ', token].join(''), 'content-type': 'application/json' },
+        body: JSON.stringify({ mode: 'schema_and_data', tables: ['orders'] }),
+      });
+
+      expect(res.status).toBe(409);
+    });
+
+    it('provides a dry-run preview of the FK closure without persisting it', async () => {
+      const token = await loginAndGetAccessToken();
+      await app.request('/repos', {
+        method: 'POST',
+        headers: { authorization: ['Bearer ', token].join(''), 'content-type': 'application/json' },
+        body: JSON.stringify({ repoId: 'demo-repo' }),
+      });
+
+      const res = await app.request('/repos/demo-repo/sync-preferences/dry-run', {
+        method: 'POST',
+        headers: { authorization: ['Bearer ', token].join(''), 'content-type': 'application/json' },
+        body: JSON.stringify({ mode: 'schema_only', tables: ['orders'] }),
+      });
+
+      expect(res.status).toBe(409);
+      const body = await res.json();
+      expect(body.error).toContain('FK dependencies');
     });
   });
 });

@@ -7,8 +7,15 @@
  */
 
 export type TransferOperation = 'push' | 'pull';
+export type SyncMode = 'schema_only' | 'schema_and_data';
 
 export type TicketStatus = 'issued' | 'active' | 'closed' | 'expired';
+
+export interface PushTicketSyncOptions {
+  mode?: SyncMode;
+  tables?: string[] | null;
+  dryRun?: boolean;
+}
 
 export interface Ticket {
   id: string;
@@ -18,4 +25,5 @@ export interface Ticket {
   status: TicketStatus;
   issuedAt: number;
   expiresAt: number;
+  syncOptions?: PushTicketSyncOptions | null;
 }

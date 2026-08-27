@@ -1,15 +1,3 @@
-/**
- * HonoJS presentation layer for the transfer context (Fase 3). Parses/
- * validates request bodies and formats responses — all ticket lifecycle
- * logic lives in `TicketService`.
- *
- * Both routes require a valid Fase 2 JWT access token (`Authorization:
- * Bearer <token>`) — the ticket is a SEPARATE, short-lived credential
- * issued on top of an already-authenticated session, never a replacement
- * for it. This is the two-layer defense-in-depth described in the
- * transfer context README: compromising a ticket must not compromise the
- * underlying session, and vice versa.
- */
 import { Hono } from 'hono';
 import { z } from 'zod';
 import { createLogger } from '../../shared/logger';
@@ -24,16 +12,24 @@ import type { TicketService } from './ticket.service';
 
 const logger = createLogger('http:transfer');
 
+const syncOptionsSchema = z
+  .object({
+    mode: z.enum(['schema_only', 'schema_and_data']).optional(),
+    tables: z.array(z.string().min(1).max(128)).max(256).nullable().optional(),
+    dryRun: z.boolean().optional(),
+  })
+  .optional();
+
 const issueTicketBodySchema = z.object({
   operation: z.enum(['push', 'pull']),
   repo: z.string().min(1).max(512),
+  sync: syncOptionsSchema,
 });
 
 const ticketIdBodySchema = z.object({
   ticketId: z.string().min(1).max(512),
 });
 
-/** Extracts and verifies the bearer access token, returning the username or null. */
 async function authenticate(
   authHeader: string | undefined,
   authService: AuthService,
@@ -67,10 +63,12 @@ export function createTransferRouter(authService: AuthService, ticketService: Ti
       return c.json({ error: 'Invalid request body' }, 400);
     }
 
+    const syncOptions = parsed.data.operation === 'push' ? (parsed.data.sync ?? null) : null;
     const ticket = await ticketService.issueTicket(
       username,
       parsed.data.operation,
       parsed.data.repo,
+      syncOptions,
     );
     logger.info(
       { username, operation: ticket.operation, repo: ticket.repo },
@@ -83,6 +81,7 @@ export function createTransferRouter(authService: AuthService, ticketService: Ti
         operation: ticket.operation,
         repo: ticket.repo,
         expiresAt: ticket.expiresAt,
+        sync: ticket.syncOptions ?? null,
       },
       201,
     );
@@ -113,8 +112,6 @@ export function createTransferRouter(authService: AuthService, ticketService: Ti
   return app;
 }
 
-// Re-exported for callers that need to distinguish ticket error types
-// (e.g. the future gRPC interceptor validating tickets on connect).
 export {
   TicketAlreadyConsumedError,
   TicketExpiredError,

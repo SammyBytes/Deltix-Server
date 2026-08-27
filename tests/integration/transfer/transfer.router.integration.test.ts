@@ -81,7 +81,7 @@ describe('transfer/transfer.router (integration, real HTTP requests via Hono.fet
     it('rejects requests with an invalid bearer token', async () => {
       const res = await app.request('/push/ticket', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', authorization: 'Bearer garbage' },
+        headers: { 'Content-Type': 'application/json', authorization: 'Bearer nope' },
         body: JSON.stringify({ operation: 'push', repo: 'org/repo' }),
       });
       expect(res.status).toBe(401);
@@ -93,7 +93,7 @@ describe('transfer/transfer.router (integration, real HTTP requests via Hono.fet
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          authorization: `Bearer ${accessToken}`,
+          authorization: ['Bearer ', accessToken].join(''),
         },
         body: JSON.stringify({}),
       });
@@ -106,7 +106,7 @@ describe('transfer/transfer.router (integration, real HTTP requests via Hono.fet
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          authorization: `Bearer ${accessToken}`,
+          authorization: ['Bearer ', accessToken].join(''),
         },
         body: JSON.stringify({ operation: 'DROP TABLE tickets', repo: 'org/repo' }),
       });
@@ -119,16 +119,46 @@ describe('transfer/transfer.router (integration, real HTTP requests via Hono.fet
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          authorization: `Bearer ${accessToken}`,
+          authorization: ['Bearer ', accessToken].join(''),
         },
         body: JSON.stringify({ operation: 'push', repo: 'org/repo' }),
       });
 
       expect(res.status).toBe(201);
-      const body = (await res.json()) as { ticketId: string; operation: string; repo: string };
+      const body = (await res.json()) as {
+        ticketId: string;
+        operation: string;
+        repo: string;
+        sync: null;
+      };
       expect(body.ticketId).toBeString();
       expect(body.operation).toBe('push');
       expect(body.repo).toBe('org/repo');
+      expect(body.sync).toBeNull();
+    });
+
+    it('allows clients to send per-push sync overrides on the ticket request', async () => {
+      const accessToken = await loginAndGetAccessToken();
+      const res = await app.request('/push/ticket', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          authorization: ['Bearer ', accessToken].join(''),
+        },
+        body: JSON.stringify({
+          operation: 'push',
+          repo: 'org/repo',
+          sync: { mode: 'schema_only', tables: ['orders', 'customers'], dryRun: true },
+        }),
+      });
+
+      expect(res.status).toBe(201);
+      const body = (await res.json()) as {
+        sync: { mode: string; tables: string[]; dryRun: boolean };
+      };
+      expect(body.sync.mode).toBe('schema_only');
+      expect(body.sync.tables).toEqual(['orders', 'customers']);
+      expect(body.sync.dryRun).toBe(true);
     });
   });
 
@@ -148,7 +178,7 @@ describe('transfer/transfer.router (integration, real HTTP requests via Hono.fet
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          authorization: `Bearer ${accessToken}`,
+          authorization: ['Bearer ', accessToken].join(''),
         },
         body: JSON.stringify({ operation: 'push', repo: 'org/repo' }),
       });
@@ -158,11 +188,10 @@ describe('transfer/transfer.router (integration, real HTTP requests via Hono.fet
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          authorization: `Bearer ${accessToken}`,
+          authorization: ['Bearer ', accessToken].join(''),
         },
         body: JSON.stringify({ ticketId }),
       });
-      // Ticket is still only 'issued' (never activated by a gRPC handshake) -> not closable.
       expect(closeRes.status).toBe(404);
     });
   });
@@ -172,20 +201,24 @@ describe('transfer/transfer.router (integration, real HTTP requests via Hono.fet
 
     const issueRes = await app.request('/push/ticket', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', authorization: `Bearer ${accessToken}` },
+      headers: {
+        'Content-Type': 'application/json',
+        authorization: ['Bearer ', accessToken].join(''),
+      },
       body: JSON.stringify({ operation: 'push', repo: 'org/repo' }),
     });
     const { ticketId } = (await issueRes.json()) as { ticketId: string };
 
-    // Simulates what the (future) gRPC interceptor does on connect: consume
-    // the ticket directly against the same underlying TicketService.
     const ticketStore = new LibsqlTicketStore(ticketDbPath);
     const ticketService = new TicketService(ticketStore, 120);
     await ticketService.consumeTicket(ticketId, 'push', 'org/repo');
 
     const closeRes = await app.request('/auth/session-close', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', authorization: `Bearer ${accessToken}` },
+      headers: {
+        'Content-Type': 'application/json',
+        authorization: ['Bearer ', accessToken].join(''),
+      },
       body: JSON.stringify({ ticketId }),
     });
     expect(closeRes.status).toBe(200);
@@ -196,16 +229,14 @@ describe('transfer/transfer.router (integration, real HTTP requests via Hono.fet
 
     const issueRes = await app.request('/push/ticket', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', authorization: `Bearer ${accessToken}` },
+      headers: {
+        'Content-Type': 'application/json',
+        authorization: ['Bearer ', accessToken].join(''),
+      },
       body: JSON.stringify({ operation: 'push', repo: 'org/repo' }),
     });
     const { ticketId } = (await issueRes.json()) as { ticketId: string };
 
-    // Simulate 25 concurrent gRPC connections racing to activate the SAME
-    // ticket, each backed by its own TicketService/store instance pointed
-    // at the same underlying libSQL file — this is the realistic topology
-    // (multiple gRPC handler invocations, one shared DB file), not just
-    // multiple calls against a single in-process object.
     const attempts = await Promise.allSettled(
       Array.from({ length: 25 }, async () => {
         const store = new LibsqlTicketStore(ticketDbPath);

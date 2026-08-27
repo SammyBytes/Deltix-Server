@@ -18,7 +18,7 @@ import {
   type GrpcTlsConfig,
 } from './grpc-transfer-server';
 import { LibsqlTransferJobStore } from './libsql-transfer-job-store';
-import type { OnPushCommitted } from './push-session-handler';
+import type { OnBeforePush, OnPushCommitted } from './push-session-handler';
 
 export interface GrpcTransferEngine {
   server: import('@grpc/grpc-js').Server;
@@ -30,6 +30,7 @@ export async function startGrpcTransferEngine(
   env: Env,
   ticketService: TicketService,
   onPushCommitted?: OnPushCommitted,
+  onBeforePush?: OnBeforePush,
 ): Promise<GrpcTransferEngine> {
   const jobStore = new LibsqlTransferJobStore(env.DELTIX_TRANSFER_JOB_DB_PATH);
   await jobStore.init();
@@ -47,6 +48,7 @@ export async function startGrpcTransferEngine(
     maxRetries: env.DELTIX_TRANSFER_JOB_MAX_RETRIES,
     tls,
     ...(onPushCommitted ? { onPushCommitted } : {}),
+    ...(onBeforePush ? { onBeforePush } : {}),
   });
 
   const port = await bindGrpcTransferServer(server, env.DELTIX_GRPC_PORT, tls);
