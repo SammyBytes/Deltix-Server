@@ -231,6 +231,18 @@ export class AuthService {
     }
     const count = await this.userStore.count();
     if (count > 0) {
+      // Self-healing migration path: a server that already had users before
+      // the global-admin flag existed (pre-v0.3.0) got every existing user
+      // migrated to `isGlobalAdmin: false`, including the operator-configured
+      // bootstrap admin. Without this, that account would be permanently
+      // locked out of the Admin Web UI after an upgrade, with no other
+      // global admin able to fix it. If the configured bootstrap account
+      // already exists but isn't a global admin, promote it — we never
+      // touch its password or create a duplicate account.
+      const existing = await this.userStore.getByUsername(credentials.username);
+      if (existing && !existing.isGlobalAdmin) {
+        await this.userStore.setGlobalAdmin(credentials.username, true);
+      }
       return;
     }
     // Same reasoning as setupFirstAdmin(): the operator-configured

@@ -288,6 +288,37 @@ describe('auth/AuthService user management', () => {
     expect(await service.isGlobalAdmin('hemiblade')).toBe(true);
   });
 
+  it('ensureBootstrapAdmin() self-heals a pre-existing bootstrap account that is not yet a global admin (e.g. after upgrading from a pre-0.3.0 server)', async () => {
+    const { service } = await createService();
+    // Simulate a server that already had users before the global-admin
+    // concept existed: create the configured bootstrap account as a
+    // plain (non-admin) user first.
+    await service.setupFirstAdmin({ username: 'someone-else', password: 's3cret-pass' });
+    await service.setGlobalAdmin('someone-else', false);
+    await service.createUser({
+      username: 'hemiblade',
+      password: 'Hemi.blade1',
+      createdBy: 'someone-else',
+    });
+    expect(await service.isGlobalAdmin('hemiblade')).toBe(false);
+
+    await service.ensureBootstrapAdmin({ username: 'hemiblade', password: 'Hemi.blade1' });
+
+    expect(await service.isGlobalAdmin('hemiblade')).toBe(true);
+  });
+
+  it('ensureBootstrapAdmin() does not create a duplicate account or touch the password when the bootstrap account already exists and is already a global admin', async () => {
+    const { service } = await createService();
+    await service.setupFirstAdmin({ username: 'hemiblade', password: 'original-pass' });
+    expect(await service.isGlobalAdmin('hemiblade')).toBe(true);
+
+    await service.ensureBootstrapAdmin({ username: 'hemiblade', password: 'ignored-pass' });
+
+    const { accessToken } = await service.login('hemiblade', 'original-pass');
+    expect(accessToken).toBeTruthy();
+    expect(await service.isGlobalAdmin('hemiblade')).toBe(true);
+  });
+
   it('createUser() defaults to a non-admin account (global admin must be granted explicitly)', async () => {
     const { service } = await createService();
     await service.setupFirstAdmin({ username: 'hemiblade', password: 's3cret-pass' });

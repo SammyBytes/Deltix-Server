@@ -9,6 +9,37 @@ Each entry starts with a **plain-language summary** (what changed, in
 everyday words) before any technical detail — written so someone outside
 engineering can understand what shipped and why it matters.
 
+## [0.3.1] - 2026-08-27
+
+**In plain terms:** if you were already running a Deltix-Server before the
+global admin feature existed and then upgraded to v0.3.0, your existing
+admin account (like `hemiblade`) silently lost admin access to the panel
+after the upgrade, with no way to get it back — a real lock-out. Fixed:
+the server now automatically restores admin access to the account
+configured in `DELTIX_BOOTSTRAP_ADMIN_USERNAME`/`PASSWORD` every time it
+starts, if that account exists but isn't currently a global admin.
+
+### Fixed
+
+- **Upgrade lock-out: pre-existing bootstrap admin lost global admin
+  after upgrading to v0.3.0.** `ensureBootstrapAdmin()` only ever acted
+  when the user database was completely empty (`count === 0`), which is
+  only true on a brand-new install. On a server that already had users
+  before v0.3.0 (all migrated to `isGlobalAdmin: false` by the schema
+  migration), the configured bootstrap account was never re-promoted,
+  and — with no other global admin able to grant the role — the Admin
+  Web UI became permanently unreachable for that account. Fixed by
+  having `ensureBootstrapAdmin()` also check whether the configured
+  bootstrap account already exists but isn't a global admin, and
+  promoting it in place (its password and every other field are left
+  untouched; no duplicate account is created).
+
+### Tests
+
+- New unit tests cover: a pre-existing, non-admin bootstrap account gets
+  promoted to global admin on the next boot; an already-admin bootstrap
+  account is left untouched (no password change, no duplicate).
+
 ## [0.3.0] - 2026-08-27
 
 **In plain terms:** until now, *any* person you created an account for
