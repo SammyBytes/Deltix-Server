@@ -1,9 +1,13 @@
 # Plan de Piloto: Deltix en un caso real (validación de Dolt)
 
-Estado del proyecto en este punto: Fases 1-4 completas en `main` (ambos repos),
-CI verde, addons con TOFU funcionando. Este documento es el plan operativo
-para desplegar un piloto controlado — **NO** es un despliegue de producción
-crítico (ver advertencias en la sección 0).
+Estado del proyecto en este punto: Fases 1-5 completas en `main` (ambos repos),
+versión `v0.2.0` publicada (imágenes `ghcr.io/sammybytes/deltix-server:0.2.0`
+y `ghcr.io/sammybytes/deltix-client:0.2.0`), CI/CD verde, addons con TOFU
+funcionando, versionado real con Dolt (branches/merge/log/diff), roles por
+repo, Admin Web UI con wizard de primer arranque y preferencias de sync.
+Este documento es el plan operativo para desplegar un piloto controlado —
+**NO** es un despliegue de producción crítico (ver advertencias en la
+sección 0).
 
 ## 0. Alcance y advertencias (léelo primero)
 
@@ -16,6 +20,27 @@ crítico (ver advertencias en la sección 0).
   Enterprise no implementado aún), monitoreo/alerting, runbook de incidentes.
 - Corta duración recomendada: 2-4 semanas, con un checkpoint de decisión
   ("¿seguimos, ajustamos, o abortamos?") al final.
+
+## 0.1 Novedades de Fase 5 relevantes para el piloto
+
+- **Primer arranque**: si no hay usuarios en la base de datos, configura
+  `DELTIX_BOOTSTRAP_ADMIN_USERNAME` / `DELTIX_BOOTSTRAP_ADMIN_PASSWORD` para
+  crear el usuario admin inicial de forma segura (hash argon2id real). Con
+  ese usuario se entra al wizard de la Admin Web UI (Driver.js) para crear
+  al resto de usuarios del piloto y asignarles acceso a addons.
+- **Roles por repo**: cada repo Dolt tiene roles `reader`/`writer`/`admin`
+  independientes. El creador de un repo queda `admin` automáticamente.
+  Fail-closed: sin rol asignado no hay acceso, ni siquiera de lectura.
+  Gestionar roles desde la Admin UI o `deltix roles list|grant|revoke`.
+- **Preferencias de sync**: antes del piloto, definir con el equipo si
+  cada repo sincroniza solo schema o schema+data, y qué tablas (las
+  relacionadas por FK se incluyen automáticamente para evitar corrupción
+  parcial). Usar `deltix sync-prefs get|set|dry-run` o la Admin UI —
+  recomendado correr `dry-run` antes del primer push real para confirmar
+  el conjunto de tablas exacto.
+- **CLI parity**: `deltix branch`, `deltix merge`, `deltix log`, `deltix diff`
+  ya están disponibles en Deltix-Client `v0.2.0` — no hace falta usar la API
+  REST directamente para las operaciones de versionado del día a día.
 
 ## 1. Preparar el entorno del piloto
 
@@ -59,13 +84,25 @@ crítico (ver advertencias en la sección 0).
 ## 3. Smoke test manual del piloto (checklist)
 
 - [ ] `curl https://<host>:<port>/admin` responde 200 (si la UI está habilitada).
+- [ ] Completar el wizard de primer arranque (Driver.js) con el usuario
+      bootstrap-admin y crear al menos un usuario adicional real del equipo.
+- [ ] Asignar rol (`reader`/`writer`/`admin`) al usuario adicional sobre el
+      repo del piloto — confirmar que sin rol asignado el acceso es denegado
+      (fail-closed) y que con `reader` no se puede hacer push.
 - [ ] Login vía Admin UI o `POST /api/v1/auth/login` con un usuario local real.
+- [ ] Configurar preferencias de sync del repo (`deltix sync-prefs set` o UI)
+      y correr `deltix sync-prefs dry-run` para confirmar el conjunto de
+      tablas antes del primer push real.
 - [ ] Crear un ticket de transferencia real y hacer `push`/`pull` desde
       Deltix-Client (binario compilado o imagen `ghcr.io/.../deltix-client`)
       apuntando al host del piloto.
-- [ ] Verificar en `dolt log` (dentro del volumen) que aparece el commit
-      generado por la transferencia — esto es lo que realmente valida que
-      Dolt está funcionando como motor de versionado real bajo carga.
+- [ ] Verificar en `dolt log` (dentro del volumen) o vía `deltix log` que
+      aparece el commit generado por la transferencia — esto es lo que
+      realmente valida que Dolt está funcionando como motor de versionado
+      real bajo carga.
+- [ ] Crear una branch de prueba (`deltix branch create`), hacer un cambio,
+      y mergearla (`deltix merge`) — confirmar que un conflicto real se
+      reporta correctamente si se fuerza uno.
 - [ ] Forzar un reinicio del contenedor y confirmar que el anti-tamper
       (chequeo de reloj vs. `dolt_log`) no bloquea un arranque legítimo.
 - [ ] (Opcional) Registrar un addon comunitario de prueba vía TOFU y
@@ -89,11 +126,13 @@ crítico (ver advertencias en la sección 0).
 ## 6. Al finalizar (checkpoint de decisión)
 
 Evaluar junto al equipo/patrocinador del piloto:
-- ¿El flujo Dolt + control plane + CLI se comportó como se esperaba bajo
-  uso real (no solo tests automatizados)?
-- ¿Qué gaps de la lista de "no crítico para producción" bloquean avanzar?
-- ¿Se justifica invertir en Fase 5 (o en las piezas de HA/backups/SSO que
-  faltan) antes de un despliegue más amplio?
+- ¿El flujo Dolt + control plane + CLI + roles + sync preferences se
+  comportó como se esperaba bajo uso real (no solo tests automatizados)?
+- ¿Qué gaps de la lista de "no crítico para producción" (sección 0)
+  bloquean avanzar?
+- ¿Se justifica invertir en HA/backups automatizados/SSO/pentest externo
+  antes de un despliegue más amplio, ahora que Fase 5 (versionado real,
+  roles, sync preferences) ya está completa?
 
 ## Referencia rápida de comandos CD
 
