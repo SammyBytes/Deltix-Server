@@ -108,6 +108,14 @@ function createInMemoryUserStore(): UserStore {
     async deleteRepoRole(username, repoId) {
       return repoRoles.delete(repoRoleKey(username, repoId));
     },
+    async setGlobalAdmin(username, isGlobalAdmin) {
+      const existing = users.get(username);
+      if (!existing) {
+        return false;
+      }
+      users.set(username, { ...existing, isGlobalAdmin });
+      return true;
+    },
   };
 }
 
@@ -268,5 +276,55 @@ describe('auth/AuthService user management', () => {
     expect(assignment).toBeNull();
     expect(await service.getRepoRole('hemiblade', 'analytics')).toBeNull();
     expect(await service.getRepoRole('alice', 'analytics')).toBe('admin');
+  });
+
+  it('setupFirstAdmin() and ensureBootstrapAdmin() always create a global admin, since no other account could grant that role on a fresh install', async () => {
+    const { service } = await createService();
+    const record = await service.setupFirstAdmin({
+      username: 'hemiblade',
+      password: 's3cret-pass',
+    });
+    expect(record.isGlobalAdmin).toBe(true);
+    expect(await service.isGlobalAdmin('hemiblade')).toBe(true);
+  });
+
+  it('createUser() defaults to a non-admin account (global admin must be granted explicitly)', async () => {
+    const { service } = await createService();
+    await service.setupFirstAdmin({ username: 'hemiblade', password: 's3cret-pass' });
+    const created = await service.createUser({
+      username: 'alice',
+      password: 's3cret-pass',
+      createdBy: 'hemiblade',
+    });
+    expect(created.isGlobalAdmin).toBe(false);
+    expect(await service.isGlobalAdmin('alice')).toBe(false);
+  });
+
+  it('setGlobalAdmin() promotes and demotes a user, and listUsers()/isGlobalAdmin() reflect the change', async () => {
+    const { service } = await createService();
+    await service.setupFirstAdmin({ username: 'hemiblade', password: 's3cret-pass' });
+    await service.createUser({
+      username: 'alice',
+      password: 's3cret-pass',
+      createdBy: 'hemiblade',
+    });
+
+    await service.setGlobalAdmin('alice', true);
+    expect(await service.isGlobalAdmin('alice')).toBe(true);
+    const users = await service.listUsers();
+    expect(users.find((u) => u.username === 'alice')?.isGlobalAdmin).toBe(true);
+
+    await service.setGlobalAdmin('alice', false);
+    expect(await service.isGlobalAdmin('alice')).toBe(false);
+  });
+
+  it('setGlobalAdmin() throws UserNotFoundError for an unknown user', async () => {
+    const { service } = await createService();
+    await expect(service.setGlobalAdmin('ghost', true)).rejects.toThrow(UserNotFoundError);
+  });
+
+  it('isGlobalAdmin() returns false for a user that does not exist (fail-closed, not an error)', async () => {
+    const { service } = await createService();
+    expect(await service.isGlobalAdmin('ghost')).toBe(false);
   });
 });

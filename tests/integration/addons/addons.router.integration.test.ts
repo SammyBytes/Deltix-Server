@@ -23,6 +23,7 @@ describe('addons/addons.router (integration, real HTTP requests via Hono.fetch)'
   let app: ReturnType<typeof createAddonsRouter>;
   let authService: AuthService;
   let trustStore: LibsqlAddonTrustStore;
+  let userStore: LibsqlUserStore;
 
   beforeEach(async () => {
     await rm(sessionDbPath, { force: true });
@@ -31,7 +32,7 @@ describe('addons/addons.router (integration, real HTTP requests via Hono.fetch)'
 
     const sessionStore = new LibsqlSessionStore(sessionDbPath);
     await sessionStore.init();
-    const userStore = new LibsqlUserStore(sessionDbPath.replace('sessions', 'users'));
+    userStore = new LibsqlUserStore(sessionDbPath.replace('sessions', 'users'));
     await userStore.init();
     await userStore.create({
       username: 'alice',
@@ -40,6 +41,7 @@ describe('addons/addons.router (integration, real HTTP requests via Hono.fetch)'
       createdBy: 'seed',
       active: true,
       lastLoginAt: null,
+      isGlobalAdmin: true,
     });
     const { privateKeyPem, publicKeyPem } = generateTestEd25519KeyPairPem();
 
@@ -72,6 +74,25 @@ describe('addons/addons.router (integration, real HTTP requests via Hono.fetch)'
     it('rejects requests with no Authorization header', async () => {
       const res = await app.request('/trust');
       expect(res.status).toBe(401);
+    });
+
+    it('rejects an authenticated non-global-admin with 403', async () => {
+      await userStore.create({
+        username: 'nonadmin',
+        passwordHash: await hashPassword('reader-pass'),
+        createdAt: Date.now(),
+        createdBy: 'alice',
+        active: true,
+        lastLoginAt: null,
+        isGlobalAdmin: false,
+      });
+      const { accessToken } = await authService.login('nonadmin', 'reader-pass');
+
+      const res = await app.request('/trust', {
+        headers: { authorization: `Bearer ${accessToken}` },
+      });
+
+      expect(res.status).toBe(403);
     });
 
     it('lists trusted addons for an authenticated caller', async () => {

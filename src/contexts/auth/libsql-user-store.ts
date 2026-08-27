@@ -15,6 +15,11 @@ function rowToUser(row: Record<string, unknown>): UserRecord {
       row.last_login_at === null || row.last_login_at === undefined
         ? null
         : Number(row.last_login_at),
+    // Older rows created before this column existed default to non-admin —
+    // see the ALTER TABLE migration below and `backfillFirstGlobalAdmin()`
+    // in AuthService, which promotes an existing sole user rather than
+    // leaving every pre-existing installation locked out of its own panel.
+    isGlobalAdmin: Number(row.is_global_admin ?? 0) === 1,
   };
 }
 
@@ -47,9 +52,14 @@ export class LibsqlUserStore implements UserStore {
         created_at INTEGER NOT NULL,
         created_by TEXT NOT NULL,
         active INTEGER NOT NULL,
-        last_login_at INTEGER
+        last_login_at INTEGER,
+        is_global_admin INTEGER NOT NULL DEFAULT 0
       )
     `);
+    // Migration for databases created before `is_global_admin` existed.
+    await this.client
+      .execute(`ALTER TABLE users ADD COLUMN is_global_admin INTEGER NOT NULL DEFAULT 0`.trim())
+      .catch(() => {});
     await this.client.execute(`
       CREATE TABLE IF NOT EXISTS repo_roles (
         username TEXT NOT NULL,
@@ -70,7 +80,7 @@ export class LibsqlUserStore implements UserStore {
 
   async list(): Promise<UserRecord[]> {
     const result = await this.client.execute(
-      `SELECT username, password_hash, created_at, created_by, active, last_login_at
+      `SELECT username, password_hash, created_at, created_by, active, last_login_at, is_global_admin
        FROM users
        ORDER BY created_at ASC, username ASC`,
     );
@@ -79,7 +89,7 @@ export class LibsqlUserStore implements UserStore {
 
   async getByUsername(username: string): Promise<UserRecord | null> {
     const result = await this.client.execute({
-      sql: `SELECT username, password_hash, created_at, created_by, active, last_login_at
+      sql: `SELECT username, password_hash, created_at, created_by, active, last_login_at, is_global_admin
             FROM users WHERE username = ?`,
       args: [username],
     });
@@ -89,8 +99,8 @@ export class LibsqlUserStore implements UserStore {
 
   async create(user: UserRecord): Promise<void> {
     await this.client.execute({
-      sql: `INSERT INTO users (username, password_hash, created_at, created_by, active, last_login_at)
-            VALUES (?, ?, ?, ?, ?, ?)`,
+      sql: `INSERT INTO users (username, password_hash, created_at, created_by, active, last_login_at, is_global_admin)
+            VALUES (?, ?, ?, ?, ?, ?, ?)`,
       args: [
         user.username,
         user.passwordHash,
@@ -98,8 +108,17 @@ export class LibsqlUserStore implements UserStore {
         user.createdBy,
         user.active ? 1 : 0,
         user.lastLoginAt,
+        user.isGlobalAdmin ? 1 : 0,
       ],
     });
+  }
+
+  async setGlobalAdmin(username: string, isGlobalAdmin: boolean): Promise<boolean> {
+    const result = await this.client.execute({
+      sql: 'UPDATE users SET is_global_admin = ? WHERE username = ?',
+      args: [isGlobalAdmin ? 1 : 0, username],
+    });
+    return result.rowsAffected === 1;
   }
 
   async setActive(username: string, active: boolean): Promise<boolean> {
@@ -128,8 +147,8 @@ export class LibsqlUserStore implements UserStore {
 
   async tryCreateFirstUser(user: UserRecord): Promise<boolean> {
     const result = await this.client.execute({
-      sql: `INSERT INTO users (username, password_hash, created_at, created_by, active, last_login_at)
-            SELECT ?, ?, ?, ?, ?, ?
+      sql: `INSERT INTO users (username, password_hash, created_at, created_by, active, last_login_at, is_global_admin)
+            SELECT ?, ?, ?, ?, ?, ?, ?
             WHERE NOT EXISTS (SELECT 1 FROM users LIMIT 1)`,
       args: [
         user.username,
@@ -138,6 +157,7 @@ export class LibsqlUserStore implements UserStore {
         user.createdBy,
         user.active ? 1 : 0,
         user.lastLoginAt,
+        user.isGlobalAdmin ? 1 : 0,
       ],
     });
     return result.rowsAffected === 1;

@@ -81,6 +81,7 @@ export class AuthService {
       accessToken,
       refreshToken,
       expiresInSeconds: this.config.accessTokenTtlSeconds,
+      isGlobalAdmin: user.isGlobalAdmin,
     };
   }
 
@@ -103,6 +104,7 @@ export class AuthService {
       accessToken,
       refreshToken,
       expiresInSeconds: this.config.accessTokenTtlSeconds,
+      isGlobalAdmin: await this.isGlobalAdmin(username),
     };
   }
 
@@ -123,7 +125,12 @@ export class AuthService {
     if (existing) {
       throw new UserAlreadyExistsError(input.username);
     }
-    const record = await this.buildUserRecord(input.username, input.password, input.createdBy);
+    const record = await this.buildUserRecord(
+      input.username,
+      input.password,
+      input.createdBy,
+      input.isGlobalAdmin ?? false,
+    );
     await this.userStore.create(record);
     return record;
   }
@@ -137,6 +144,7 @@ export class AuthService {
         createdBy: user.createdBy,
         active: user.active,
         lastLoginAt: user.lastLoginAt,
+        isGlobalAdmin: user.isGlobalAdmin,
         activeSessions: await this.sessionStore.countActiveSessionsForUser(
           user.username,
           this.now(),
@@ -170,6 +178,26 @@ export class AuthService {
     }
   }
 
+  /**
+   * Global admin gates the Admin Web UI and the user-management API
+   * (`/api/v1/auth/users*`) — it is intentionally distinct from any
+   * per-repo `RepoRole`. A repo admin must never be able to reach here:
+   * only an existing global admin may call this (enforced by the router,
+   * not this method, mirroring every other authorization check in this
+   * service).
+   */
+  async setGlobalAdmin(username: string, isGlobalAdmin: boolean): Promise<void> {
+    const updated = await this.userStore.setGlobalAdmin(username, isGlobalAdmin);
+    if (!updated) {
+      throw new UserNotFoundError(username);
+    }
+  }
+
+  async isGlobalAdmin(username: string): Promise<boolean> {
+    const user = await this.userStore.getByUsername(username);
+    return user?.isGlobalAdmin ?? false;
+  }
+
   async getSetupStatus(): Promise<SetupStatus> {
     if (this.config.bootstrapAdminConfigured) {
       return { eligible: false, reason: 'bootstrap_env_configured' };
@@ -185,7 +213,9 @@ export class AuthService {
     if (!status.eligible) {
       throw new SetupAlreadyConfiguredError();
     }
-    const record = await this.buildUserRecord(input.username, input.password, 'setup-wizard');
+    // The very first account created for a fresh install is always a
+    // global admin — otherwise nobody could ever reach the Admin Web UI.
+    const record = await this.buildUserRecord(input.username, input.password, 'setup-wizard', true);
     const created = await this.userStore.tryCreateFirstUser(record);
     if (!created) {
       throw new SetupAlreadyConfiguredError();
@@ -203,10 +233,14 @@ export class AuthService {
     if (count > 0) {
       return;
     }
+    // Same reasoning as setupFirstAdmin(): the operator-configured
+    // bootstrap account must be a global admin, or the freshly-booted
+    // server would have no way to grant that role to anyone.
     const record = await this.buildUserRecord(
       credentials.username,
       credentials.password,
       'bootstrap-env',
+      true,
     );
     const created = await this.userStore.tryCreateFirstUser(record);
     if (!created) {
@@ -327,6 +361,7 @@ export class AuthService {
         createdBy: 'legacy-env',
         active: true,
         lastLoginAt: null,
+        isGlobalAdmin: false,
       };
     }
 
@@ -337,6 +372,7 @@ export class AuthService {
       createdBy: 'unknown',
       active: true,
       lastLoginAt: null,
+      isGlobalAdmin: false,
     };
   }
 
@@ -344,6 +380,7 @@ export class AuthService {
     username: string,
     password: string,
     createdBy: string,
+    isGlobalAdmin = false,
   ): Promise<UserRecord> {
     return {
       username,
@@ -352,6 +389,7 @@ export class AuthService {
       createdBy,
       active: true,
       lastLoginAt: null,
+      isGlobalAdmin,
     };
   }
 }

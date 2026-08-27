@@ -38,6 +38,7 @@ describe('auth/auth.router (integration, real HTTP requests via Hono.fetch)', ()
       createdBy: 'seed',
       active: true,
       lastLoginAt: null,
+      isGlobalAdmin: false,
     });
 
     const service = new AuthService(
@@ -273,5 +274,63 @@ describe('auth/auth.router (integration, real HTTP requests via Hono.fetch)', ()
       headers: { Cookie: cookiePair },
     });
     expect(refreshRes.status).toBe(401);
+  });
+
+  it('POST /login reports isGlobalAdmin: false for a non-admin account', async () => {
+    const res = await app.request('/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'alice', password: 's3cret-pass' }),
+    });
+    const body = (await res.json()) as { isGlobalAdmin: boolean };
+    expect(body.isGlobalAdmin).toBe(false);
+  });
+
+  it('GET /users rejects a non-global-admin (authenticated but insufficient privilege) with 403', async () => {
+    const loginRes = await app.request('/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'alice', password: 's3cret-pass' }),
+    });
+    const { accessToken } = (await loginRes.json()) as { accessToken: string };
+
+    const res = await app.request('/users', {
+      headers: { authorization: `Bearer ${accessToken}` },
+    });
+    expect(res.status).toBe(403);
+  });
+
+  it('POST /users rejects a non-global-admin with 403 (cannot create accounts without global admin)', async () => {
+    const loginRes = await app.request('/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'alice', password: 's3cret-pass' }),
+    });
+    const { accessToken } = (await loginRes.json()) as { accessToken: string };
+
+    const res = await app.request('/users', {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${accessToken}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({ username: 'newuser', password: 'newpassword123' }),
+    });
+    expect(res.status).toBe(403);
+  });
+
+  it('POST /users/:username/global-admin rejects a non-global-admin caller with 403', async () => {
+    const loginRes = await app.request('/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'alice', password: 's3cret-pass' }),
+    });
+    const { accessToken } = (await loginRes.json()) as { accessToken: string };
+
+    const res = await app.request('/users/alice/global-admin', {
+      method: 'POST',
+      headers: { authorization: `Bearer ${accessToken}` },
+    });
+    expect(res.status).toBe(403);
   });
 });

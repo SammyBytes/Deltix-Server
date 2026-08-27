@@ -26,6 +26,7 @@ describe('auth/auth.router fuzzing (integration, adversarial payloads)', () => {
       createdBy: 'seed',
       active: true,
       lastLoginAt: null,
+      isGlobalAdmin: false,
     });
 
     const service = new AuthService(

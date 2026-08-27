@@ -206,6 +206,9 @@ export function createAuthRouter(authService: AuthService, secureCookies = true)
     if (!username) {
       return c.json({ error: 'Unauthorized' }, 401);
     }
+    if (!(await authService.isGlobalAdmin(username))) {
+      return c.json({ error: 'Global admin access required' }, 403);
+    }
     const users = await authService.listUsers();
     return c.json({ users }, 200);
   });
@@ -215,6 +218,9 @@ export function createAuthRouter(authService: AuthService, secureCookies = true)
     if (!username) {
       return c.json({ error: 'Unauthorized' }, 401);
     }
+    if (!(await authService.isGlobalAdmin(username))) {
+      return c.json({ error: 'Global admin access required' }, 403);
+    }
     const parsed = createUserSchema.safeParse(await c.req.json().catch(() => null));
     if (!parsed.success) {
       return c.json({ error: 'Invalid request body', details: parsed.error.issues }, 400);
@@ -222,7 +228,14 @@ export function createAuthRouter(authService: AuthService, secureCookies = true)
     try {
       const user = await authService.createUser({ ...parsed.data, createdBy: username });
       return c.json(
-        { user: { username: user.username, createdAt: user.createdAt, active: true } },
+        {
+          user: {
+            username: user.username,
+            createdAt: user.createdAt,
+            active: true,
+            isGlobalAdmin: user.isGlobalAdmin,
+          },
+        },
         201,
       );
     } catch (err) {
@@ -237,6 +250,9 @@ export function createAuthRouter(authService: AuthService, secureCookies = true)
     const caller = await authenticateBearerToken(c.req.header('authorization'), authService);
     if (!caller) {
       return c.json({ error: 'Unauthorized' }, 401);
+    }
+    if (!(await authService.isGlobalAdmin(caller))) {
+      return c.json({ error: 'Global admin access required' }, 403);
     }
     try {
       await authService.deactivateUser(c.req.param('username'));
@@ -254,6 +270,9 @@ export function createAuthRouter(authService: AuthService, secureCookies = true)
     if (!caller) {
       return c.json({ error: 'Unauthorized' }, 401);
     }
+    if (!(await authService.isGlobalAdmin(caller))) {
+      return c.json({ error: 'Global admin access required' }, 403);
+    }
     try {
       await authService.reactivateUser(c.req.param('username'));
       return c.json({ ok: true }, 200);
@@ -270,6 +289,9 @@ export function createAuthRouter(authService: AuthService, secureCookies = true)
     if (!caller) {
       return c.json({ error: 'Unauthorized' }, 401);
     }
+    if (!(await authService.isGlobalAdmin(caller))) {
+      return c.json({ error: 'Global admin access required' }, 403);
+    }
     try {
       await authService.deleteUser(c.req.param('username'));
       return c.json({ ok: true }, 200);
@@ -277,6 +299,55 @@ export function createAuthRouter(authService: AuthService, secureCookies = true)
       if (err instanceof UserHasActiveSessionsError) {
         return c.json({ error: err.message }, 409);
       }
+      if (err instanceof UserNotFoundError) {
+        return c.json({ error: err.message }, 404);
+      }
+      throw err;
+    }
+  });
+
+  // Global-admin role management. Deliberately separate from per-repo roles
+  // (see versioning.router.ts `/repos/:repoId/roles`) — a repo admin must
+  // never be able to reach these, only an existing global admin.
+  app.post('/users/:username/global-admin', async (c) => {
+    const caller = await authenticateBearerToken(c.req.header('authorization'), authService);
+    if (!caller) {
+      return c.json({ error: 'Unauthorized' }, 401);
+    }
+    if (!(await authService.isGlobalAdmin(caller))) {
+      return c.json({ error: 'Global admin access required' }, 403);
+    }
+    try {
+      await authService.setGlobalAdmin(c.req.param('username'), true);
+      return c.json({ ok: true }, 200);
+    } catch (err) {
+      if (err instanceof UserNotFoundError) {
+        return c.json({ error: err.message }, 404);
+      }
+      throw err;
+    }
+  });
+
+  app.delete('/users/:username/global-admin', async (c) => {
+    const caller = await authenticateBearerToken(c.req.header('authorization'), authService);
+    if (!caller) {
+      return c.json({ error: 'Unauthorized' }, 401);
+    }
+    if (!(await authService.isGlobalAdmin(caller))) {
+      return c.json({ error: 'Global admin access required' }, 403);
+    }
+    const target = c.req.param('username');
+    if (target === caller) {
+      const users = await authService.listUsers();
+      const remainingAdmins = users.filter((u) => u.isGlobalAdmin).length;
+      if (remainingAdmins <= 1) {
+        return c.json({ error: 'Cannot remove the last remaining global admin' }, 409);
+      }
+    }
+    try {
+      await authService.setGlobalAdmin(target, false);
+      return c.json({ ok: true }, 200);
+    } catch (err) {
       if (err instanceof UserNotFoundError) {
         return c.json({ error: err.message }, 404);
       }

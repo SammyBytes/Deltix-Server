@@ -92,6 +92,7 @@ describe('gRPC transfer engine boot smoke test (real subprocess, real TLS, real 
       createdBy: 'test-seed',
       active: true,
       lastLoginAt: null,
+      isGlobalAdmin: false,
     });
     await userStore.upsertRepoRole({
       username: 'alice',

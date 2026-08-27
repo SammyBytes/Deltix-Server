@@ -7,6 +7,11 @@ export interface UserRecord {
   createdBy: string;
   active: boolean;
   lastLoginAt: number | null;
+  // Global admin is a distinct, more powerful flag than any per-repo role:
+  // it gates access to the Admin Web UI and the user-management API
+  // (`/api/v1/auth/users*`). A per-repo `admin` role (see `RepoRole`) only
+  // controls one repo and must never be treated as equivalent to this.
+  isGlobalAdmin: boolean;
 }
 
 export interface LegacyUserRecord {
@@ -29,4 +34,5 @@ export interface UserStore {
   listRepoRoles(repoId: string): Promise<RepoRoleAssignment[]>;
   upsertRepoRole(assignment: RepoRoleAssignment): Promise<void>;
   deleteRepoRole(username: string, repoId: string): Promise<boolean>;
+  setGlobalAdmin(username: string, isGlobalAdmin: boolean): Promise<boolean>;
 }

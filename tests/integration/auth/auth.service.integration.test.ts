@@ -44,6 +44,7 @@ describe('auth/auth.service (integration, real libSQL + real JWT signing)', () =
       createdBy: 'seed',
       active: true,
       lastLoginAt: null,
+      isGlobalAdmin: false,
     });
 
     service = new AuthService(

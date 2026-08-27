@@ -1,6 +1,8 @@
 let accessToken = null;
 let currentUsername = null;
+let currentIsGlobalAdmin = false;
 let pendingDeleteUsername = null;
+let selectedRolesRepoId = '';
 
 const form = document.getElementById('login-form');
 const errorMessage = document.getElementById('error-message');
@@ -8,11 +10,14 @@ const loginView = document.getElementById('login-view');
 const sessionPanel = document.getElementById('session-panel');
 const sessionUsername = document.getElementById('session-username');
 const logoutButton = document.getElementById('logout-button');
+const notAdminNotice = document.getElementById('not-admin-notice');
 const trustForm = document.getElementById('trust-form');
 const trustMessage = document.getElementById('trust-message');
 const trustList = document.getElementById('trust-list');
+const addonsScreen = document.getElementById('addons-screen');
 const setupForm = document.getElementById('setup-form');
 const setupMessage = document.getElementById('setup-message');
+const usersScreen = document.getElementById('users-screen');
 const userCreateForm = document.getElementById('user-create-form');
 const userMessage = document.getElementById('user-message');
 const userList = document.getElementById('user-list');
@@ -21,6 +26,11 @@ const deleteConfirmPanel = document.getElementById('delete-confirm-panel');
 const deleteUsername = document.getElementById('delete-username');
 const confirmDeleteButton = document.getElementById('confirm-delete-button');
 const cancelDeleteButton = document.getElementById('cancel-delete-button');
+const rolesScreen = document.getElementById('roles-screen');
+const rolesRepoSelect = document.getElementById('roles-repo-select');
+const roleGrantForm = document.getElementById('role-grant-form');
+const roleMessage = document.getElementById('role-message');
+const rolesList = document.getElementById('roles-list');
 
 function withViewTransition(mutate) {
   if (typeof document.startViewTransition === 'function') {
@@ -51,22 +61,46 @@ function cssSafe(value) {
   return value.replace(/[^a-zA-Z0-9-]/g, '-');
 }
 
-function showSession(username) {
+function showSession(username, isGlobalAdmin) {
   withViewTransition(() => {
     currentUsername = username;
+    currentIsGlobalAdmin = Boolean(isGlobalAdmin);
     if (loginView) loginView.classList.add('hidden');
     if (sessionPanel) sessionPanel.classList.remove('hidden');
     if (sessionUsername) sessionUsername.textContent = username;
+    applyGlobalAdminGating();
   });
+  if (!currentIsGlobalAdmin) return;
   void loadUsers();
   void loadTrustedAddons();
+  void loadReposForRoles();
   maybeRunAddonsTour();
   maybeRunUsersTour();
+}
+
+/**
+ * Global admin gates the entire management surface of the Admin Web UI —
+ * Users, Repository roles, and Community addon trust. A user who is
+ * authenticated but not a global admin sees only the "signed in as" header
+ * and an explanatory notice; none of the management API calls fire for
+ * them (defense in depth: the server-side endpoints already reject with
+ * 403, this just avoids a confusing wall of failed requests in the UI).
+ */
+function applyGlobalAdminGating() {
+  const show = (el, visible) => {
+    if (!el) return;
+    el.classList.toggle('hidden', !visible);
+  };
+  show(usersScreen, currentIsGlobalAdmin);
+  show(rolesScreen, currentIsGlobalAdmin);
+  show(addonsScreen, currentIsGlobalAdmin);
+  show(notAdminNotice, !currentIsGlobalAdmin);
 }
 
 function showForm() {
   withViewTransition(() => {
     currentUsername = null;
+    currentIsGlobalAdmin = false;
     accessToken = null;
     if (sessionPanel) sessionPanel.classList.add('hidden');
     if (loginView) loginView.classList.remove('hidden');
@@ -93,7 +127,7 @@ if (form) {
       }
       const data = await res.json();
       accessToken = data.accessToken;
-      showSession(data.username);
+      showSession(data.username, data.isGlobalAdmin);
     } catch {
       setInlineMessage(errorMessage, 'Could not reach the Deltix-Server.', true);
     }
@@ -223,7 +257,7 @@ function renderUsers(users) {
     if (users.length === 0) {
       const emptyRow = document.createElement('tr');
       emptyRow.id = 'user-empty-row';
-      emptyRow.innerHTML = '<td colspan="6" class="px-3 py-4 text-center text-neutral-500">No users created yet.</td>';
+      emptyRow.innerHTML = '<td colspan="7" class="px-3 py-4 text-center text-neutral-500">No users created yet.</td>';
       userList.append(emptyRow);
       return;
     }
@@ -240,28 +274,61 @@ function renderUsers(users) {
       toggleBtn.textContent = user.active ? 'Deactivate' : 'Reactivate';
       toggleBtn.setAttribute('aria-label', user.active ? 'Deactivate ' + user.username : 'Reactivate ' + user.username);
       toggleBtn.addEventListener('click', () => toggleUser(user));
+      const adminToggleBtn = document.createElement('button');
+      adminToggleBtn.type = 'button';
+      adminToggleBtn.className = 'mr-2 rounded-md border border-neutral-700 px-2 py-1 text-xs hover:bg-neutral-800';
+      adminToggleBtn.textContent = user.isGlobalAdmin ? 'Revoke admin' : 'Make admin';
+      adminToggleBtn.setAttribute(
+        'aria-label',
+        (user.isGlobalAdmin ? 'Revoke global admin from ' : 'Make ') + user.username + (user.isGlobalAdmin ? '' : ' a global admin'),
+      );
+      adminToggleBtn.addEventListener('click', () => toggleGlobalAdmin(user));
       const deleteBtn = document.createElement('button');
       deleteBtn.type = 'button';
       deleteBtn.className = 'rounded-md border border-red-900 px-2 py-1 text-xs text-red-300 hover:bg-red-950/50';
       deleteBtn.textContent = 'Delete';
       deleteBtn.setAttribute('aria-label', 'Delete ' + user.username);
       deleteBtn.addEventListener('click', () => promptDeleteUser(user.username));
-      actions.append(toggleBtn, deleteBtn);
+      actions.append(toggleBtn, adminToggleBtn, deleteBtn);
       row.innerHTML =
         '<td class="px-3 py-2 font-medium"></td>' +
+        '<td class="px-3 py-2"></td>' +
         '<td class="px-3 py-2"></td>' +
         '<td class="px-3 py-2 text-neutral-400"></td>' +
         '<td class="px-3 py-2"></td>' +
         '<td class="px-3 py-2 text-neutral-400"></td>';
       row.children[0].textContent = user.username;
       row.children[1].textContent = user.active ? 'Active' : 'Inactive';
-      row.children[2].textContent = new Date(user.createdAt).toLocaleString();
-      row.children[3].textContent = String(user.activeSessions);
-      row.children[4].textContent = user.lastLoginAt ? new Date(user.lastLoginAt).toLocaleString() : 'Never';
+      row.children[2].textContent = user.isGlobalAdmin ? 'Yes' : 'No';
+      row.children[3].textContent = new Date(user.createdAt).toLocaleString();
+      row.children[4].textContent = String(user.activeSessions);
+      row.children[5].textContent = user.lastLoginAt ? new Date(user.lastLoginAt).toLocaleString() : 'Never';
       row.append(actions);
       userList.append(row);
     }
   });
+}
+
+async function toggleGlobalAdmin(user) {
+  try {
+    const res = await fetch(
+      '/api/v1/auth/users/' + encodeURIComponent(user.username) + '/global-admin',
+      { method: user.isGlobalAdmin ? 'DELETE' : 'POST', headers: authHeaders() },
+    );
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      setInlineMessage(userMessage, data.error || 'Could not update global admin status.', true);
+      return;
+    }
+    setInlineMessage(
+      userMessage,
+      user.isGlobalAdmin ? 'Global admin revoked' : 'Global admin granted',
+      false,
+    );
+    await loadUsers();
+  } catch {
+    setInlineMessage(userMessage, 'Could not reach the Deltix-Server.', true);
+  }
 }
 
 async function toggleUser(user) {
@@ -391,7 +458,7 @@ async function restoreSessionOnLoad() {
     if (!res.ok) return;
     const data = await res.json();
     accessToken = data.accessToken;
-    showSession(data.username);
+    showSession(data.username, data.isGlobalAdmin);
   } catch {}
 }
 
@@ -441,6 +508,149 @@ function maybeRunUsersTour() {
   });
   driverInstance.drive();
   localStorage.setItem('deltix-admin-users-tour-seen', 'true');
+}
+
+async function loadReposForRoles() {
+  if (!rolesRepoSelect || !accessToken) return;
+  try {
+    const res = await fetch('/api/v1/versioning/repos', { headers: authHeaders() });
+    if (!res.ok) return;
+    const data = await res.json();
+    const repos = data.repos || [];
+    const previouslySelected = rolesRepoSelect.value;
+    rolesRepoSelect.innerHTML = '<option value="">Select a repository…</option>';
+    for (const repo of repos) {
+      const option = document.createElement('option');
+      option.value = repo.repoId;
+      option.textContent = repo.repoId;
+      rolesRepoSelect.append(option);
+    }
+    if (previouslySelected && repos.some((repo) => repo.repoId === previouslySelected)) {
+      rolesRepoSelect.value = previouslySelected;
+    }
+  } catch {}
+}
+
+async function loadRepoRoles(repoId) {
+  if (!rolesList) return;
+  if (!repoId) {
+    renderRepoRoles([]);
+    return;
+  }
+  try {
+    const res = await fetch('/api/v1/versioning/repos/' + encodeURIComponent(repoId) + '/roles', {
+      headers: authHeaders(),
+    });
+    if (!res.ok) {
+      renderRepoRoles([]);
+      return;
+    }
+    const data = await res.json();
+    renderRepoRoles(data.roles || []);
+  } catch {
+    renderRepoRoles([]);
+  }
+}
+
+function renderRepoRoles(roles) {
+  if (!rolesList) return;
+  withViewTransition(() => {
+    rolesList.innerHTML = '';
+    if (roles.length === 0) {
+      const emptyRow = document.createElement('tr');
+      emptyRow.id = 'roles-empty-row';
+      emptyRow.innerHTML =
+        '<td colspan="5" class="px-3 py-4 text-center text-neutral-500">' +
+        (selectedRolesRepoId ? 'No roles granted for this repository yet.' : 'Select a repository to view its roles.') +
+        '</td>';
+      rolesList.append(emptyRow);
+      return;
+    }
+    for (const assignment of roles) {
+      const row = document.createElement('tr');
+      row.className = 'border-b border-neutral-800 last:border-0 hover:bg-neutral-800/40';
+      const revokeBtn = document.createElement('button');
+      revokeBtn.type = 'button';
+      revokeBtn.textContent = 'Revoke';
+      revokeBtn.className = 'text-red-400 hover:text-red-300';
+      revokeBtn.addEventListener('click', () => revokeRepoRole(assignment.username));
+      row.innerHTML =
+        '<td class="px-3 py-2 font-medium"></td>' +
+        '<td class="px-3 py-2"></td>' +
+        '<td class="px-3 py-2 text-neutral-400"></td>' +
+        '<td class="px-3 py-2 text-neutral-400"></td>' +
+        '<td class="px-3 py-2 text-right"></td>';
+      row.children[0].textContent = assignment.username;
+      row.children[1].textContent = assignment.role;
+      row.children[2].textContent = new Date(assignment.grantedAt).toLocaleString();
+      row.children[3].textContent = assignment.grantedBy;
+      row.children[4].append(revokeBtn);
+      rolesList.append(row);
+    }
+  });
+}
+
+if (rolesRepoSelect) {
+  rolesRepoSelect.addEventListener('change', () => {
+    selectedRolesRepoId = rolesRepoSelect.value;
+    clearInlineMessage(roleMessage);
+    void loadRepoRoles(selectedRolesRepoId);
+  });
+}
+
+if (roleGrantForm) {
+  roleGrantForm.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    clearInlineMessage(roleMessage);
+    if (!selectedRolesRepoId) {
+      setInlineMessage(roleMessage, 'Select a repository first.', true);
+      return;
+    }
+    const username = document.getElementById('role-grant-username').value.trim();
+    const role = document.getElementById('role-grant-role').value;
+    try {
+      const res = await fetch(
+        '/api/v1/versioning/repos/' + encodeURIComponent(selectedRolesRepoId) + '/roles',
+        {
+          method: 'POST',
+          headers: Object.assign({ 'content-type': 'application/json' }, authHeaders()),
+          body: JSON.stringify({ username, role }),
+        },
+      );
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setInlineMessage(roleMessage, data.error || 'Could not grant role.', true);
+        return;
+      }
+      setInlineMessage(roleMessage, 'Granted "' + role + '" to ' + username + '.', false);
+      roleGrantForm.reset();
+      await loadRepoRoles(selectedRolesRepoId);
+    } catch {
+      setInlineMessage(roleMessage, 'Could not reach the Deltix-Server.', true);
+    }
+  });
+}
+
+async function revokeRepoRole(username) {
+  if (!selectedRolesRepoId) return;
+  try {
+    const res = await fetch(
+      '/api/v1/versioning/repos/' +
+        encodeURIComponent(selectedRolesRepoId) +
+        '/roles/' +
+        encodeURIComponent(username),
+      { method: 'DELETE', headers: authHeaders() },
+    );
+    if (!res.ok && res.status !== 204) {
+      const data = await res.json().catch(() => ({}));
+      setInlineMessage(roleMessage, data.error || 'Could not revoke role.', true);
+      return;
+    }
+    setInlineMessage(roleMessage, 'Revoked role for ' + username + '.', false);
+    await loadRepoRoles(selectedRolesRepoId);
+  } catch {
+    setInlineMessage(roleMessage, 'Could not reach the Deltix-Server.', true);
+  }
 }
 
 restoreSessionOnLoad();

@@ -266,6 +266,23 @@ tickets). It is explicitly **not** used for anti-tamper (see §1.7).
   Tickets & gRPC Engine (:50051) → (4) Dynamic Add-on Loading → (5) Enterprise Packaging
   (Podman + single binary).
 
+## 14a. Global admin vs. per-repo roles — never conflate these (added in v0.3.0)
+
+- **`isGlobalAdmin`** is a single account-wide boolean. It gates the entire Admin Web UI plus
+  every `/api/v1/auth/users*` and `/api/v1/addons/*` endpoint. Only a global admin can create/
+  delete users, grant/revoke global admin, or manage community add-on trust.
+- **`RepoRole`** (`reader`/`writer`/`admin`) is scoped to exactly one repository, managed via
+  `/api/v1/versioning/repos/:repoId/roles`. A repo `admin` role NEVER implies global admin
+  access — it only controls that one repo's branches/commits/roles.
+- The first account ever created on a server (setup wizard or `DELTIX_BOOTSTRAP_ADMIN_*` env
+  vars) is always forced to `isGlobalAdmin: true` — otherwise a fresh install has no path to
+  ever grant the role to anyone.
+- `DELETE /users/:username/global-admin` refuses to let the last remaining global admin revoke
+  their own role (409), to prevent an irrecoverable lockout.
+- Any new admin-only capability added in the future must be gated on `isGlobalAdmin`, not on
+  any repo role, and must fail-closed (403) server-side — never rely on the Admin Web UI hiding
+  a panel as the only enforcement.
+
 ## 14. CHANGELOG conventions
 
 - Every release entry starts with a short **"In plain terms:"** summary in everyday language —

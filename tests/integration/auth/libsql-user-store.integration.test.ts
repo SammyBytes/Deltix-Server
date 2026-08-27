@@ -29,6 +29,7 @@ describe('auth/libsql-user-store (integration, real libSQL file)', () => {
       createdBy: 'setup',
       active: true,
       lastLoginAt: null,
+      isGlobalAdmin: false,
     });
     await store.updateLastLogin('alice', 2000);
     await store.setActive('alice', false);
@@ -51,6 +52,7 @@ describe('auth/libsql-user-store (integration, real libSQL file)', () => {
         createdBy: 'setup',
         active: true,
         lastLoginAt: null,
+        isGlobalAdmin: false,
       }),
       store.tryCreateFirstUser({
         username: 'bob',
@@ -59,6 +61,7 @@ describe('auth/libsql-user-store (integration, real libSQL file)', () => {
         createdBy: 'setup',
         active: true,
         lastLoginAt: null,
+        isGlobalAdmin: false,
       }),
     ]);
 

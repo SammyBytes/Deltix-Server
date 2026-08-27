@@ -74,6 +74,9 @@ export function createAddonsRouter(authService: AuthService, trustStore: AddonTr
     if (!username) {
       return c.json({ error: 'Unauthorized' }, 401);
     }
+    if (!(await authService.isGlobalAdmin(username))) {
+      return c.json({ error: 'Global admin access required' }, 403);
+    }
 
     const trusted = await trustStore.listTrusted();
     return c.json({ trusted }, 200);
@@ -83,6 +86,9 @@ export function createAddonsRouter(authService: AuthService, trustStore: AddonTr
     const username = await authenticate(c.req.header('authorization'), authService);
     if (!username) {
       return c.json({ error: 'Unauthorized' }, 401);
+    }
+    if (!(await authService.isGlobalAdmin(username))) {
+      return c.json({ error: 'Global admin access required' }, 403);
     }
 
     const parsed = trustRequestSchema.safeParse(await c.req.json().catch(() => null));
@@ -108,6 +114,9 @@ export function createAddonsRouter(authService: AuthService, trustStore: AddonTr
     const username = await authenticate(c.req.header('authorization'), authService);
     if (!username) {
       return c.json({ error: 'Unauthorized' }, 401);
+    }
+    if (!(await authService.isGlobalAdmin(username))) {
+      return c.json({ error: 'Global admin access required' }, 403);
     }
 
     const parsed = z

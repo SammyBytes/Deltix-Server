@@ -24,6 +24,7 @@ export interface LoginResult {
   accessToken: string;
   refreshToken: string;
   expiresInSeconds: number;
+  isGlobalAdmin: boolean;
 }
 
 export interface SessionRecord {
@@ -37,6 +38,7 @@ export interface CreateUserInput {
   username: string;
   password: string;
   createdBy: string;
+  isGlobalAdmin?: boolean;
 }
 
 // Deliberately excludes `passwordHash` — this type is returned directly to
@@ -51,6 +53,7 @@ export interface UserSummary {
   active: boolean;
   lastLoginAt: number | null;
   activeSessions: number;
+  isGlobalAdmin: boolean;
 }
 
 export interface SetupStatus {

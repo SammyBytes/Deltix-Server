@@ -73,6 +73,12 @@ function inMemoryUserStore(user: UserRecord): UserStore {
     async getRepoRole() {
       return null;
     },
+    async setGlobalAdmin(username, isGlobalAdmin) {
+      const found = users.get(username);
+      if (!found) return false;
+      users.set(username, { ...found, isGlobalAdmin });
+      return true;
+    },
     async listRepoRoles() {
       return [];
     },
@@ -105,6 +111,7 @@ describe('auth concurrency (real parallel requests, no fakes for timing)', () =>
         createdBy: 'seed',
         active: true,
         lastLoginAt: null,
+        isGlobalAdmin: false,
       }),
       inMemorySessionStore(),
     );
@@ -150,6 +157,7 @@ describe('auth concurrency (real parallel requests, no fakes for timing)', () =>
         createdBy: 'seed',
         active: true,
         lastLoginAt: null,
+        isGlobalAdmin: false,
       }),
       inMemorySessionStore(),
     );

@@ -9,6 +9,62 @@ Each entry starts with a **plain-language summary** (what changed, in
 everyday words) before any technical detail — written so someone outside
 engineering can understand what shipped and why it matters.
 
+## [0.3.0] - 2026-08-27
+
+**In plain terms:** until now, *any* person you created an account for
+could open the Admin panel and manage every other user, including
+creating new accounts and controlling which community add-ons the server
+trusts — there was no way to make someone "just a regular user." Fixed:
+there is now a real **global admin** role, separate from per-repository
+roles. Only a global admin can open the Admin panel's user/add-on
+management screens; everyone else is politely turned away. On top of
+that, global admins can now manage **repository roles** (who can read,
+write, or administer each individual repo) directly from the Admin panel,
+instead of only via the CLI.
+
+### Added
+
+- **Global admin role**, a new account-wide flag separate from per-repo
+  roles (`reader`/`writer`/`admin` on one repository). Only accounts with
+  global admin can: reach the Admin panel's user list, create/deactivate/
+  delete users, grant or revoke global admin from someone else, and
+  manage which community add-ons the server trusts. Every non-global-admin
+  request to those endpoints now gets a clear `403 Forbidden` instead of
+  silently succeeding.
+- The very first account created on a fresh install (via the setup wizard
+  or the `DELTIX_BOOTSTRAP_ADMIN_*` environment variables) is always made
+  a global admin automatically — otherwise nobody could ever grant the
+  role to anyone.
+- A safeguard prevents the *last remaining* global admin from removing
+  their own admin role, so a server can never be accidentally locked out
+  of its own admin panel.
+- **New Admin panel screen: Repository roles.** Pick a repository, see who
+  currently has reader/writer/admin access to it, grant a role to a
+  username, or revoke one — all without touching the CLI.
+- Non-global-admin users who sign in now see a short, friendly notice
+  explaining they don't have admin access, instead of a confusing empty
+  or broken screen.
+
+### Security
+
+- **Closed a real privilege gap**: previously, any authenticated user
+  account (even one meant to be a read-only collaborator) had unrestricted
+  access to user management and add-on trust management. This is a
+  meaningful hardening in line with the project's original OWASP
+  access-control requirements ("only admin-role accounts may reach the
+  Admin panel").
+
+### Tests
+
+- New unit and integration tests cover: granting/revoking global admin,
+  the last-admin lockout protection, every gated endpoint rejecting a
+  non-admin caller with 403, and the first-boot/bootstrap-admin accounts
+  always being created as global admins.
+- Manually verified end-to-end in a real headless browser: a global admin
+  sees the Users/Roles/Add-ons screens and can grant/revoke a repo role;
+  a regular user sees none of those screens and instead sees the
+  not-admin notice.
+
 ## [0.2.4] - 2026-08-27
 
 **In plain terms:** the Admin panel (`/admin`) was completely unstyled and

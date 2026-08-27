@@ -46,6 +46,7 @@ describe('versioning/versioning.router (integration, real HTTP requests via Hono
       createdBy: 'seed',
       active: true,
       lastLoginAt: null,
+      isGlobalAdmin: false,
     });
     await userStore.create({
       username: 'bob',
@@ -54,6 +55,7 @@ describe('versioning/versioning.router (integration, real HTTP requests via Hono
       createdBy: 'seed',
       active: true,
       lastLoginAt: null,
+      isGlobalAdmin: false,
     });
     const { privateKeyPem, publicKeyPem } = generateTestEd25519KeyPairPem();
 
