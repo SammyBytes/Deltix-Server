@@ -94,6 +94,41 @@ modelo de usuarios ya existe de verdad)**.
    la env var puede mantenerse como *seed* opcional para bootstrap sin UI (útil en
    Docker/CI), pero la fuente de verdad en producción pasa a ser la base de datos.
 
+### UI/UX y onboarding (driver.js)
+- Sigue el patrón ya establecido en `src/contexts/admin-ui/assets/app.js`: cada
+  feature nueva de la Admin UI trae su propio tour de `driver.js`, activado una
+  sola vez vía una key propia de `localStorage` (ej. `deltix-admin-setup-tour-seen`,
+  `deltix-admin-users-tour-seen`), independiente de los tours existentes (login,
+  addons) para no repetir onboarding ya visto.
+- El wizard de primer arranque (`/admin/setup`) es, en sí mismo, un flujo guiado
+  paso a paso (no un tour superpuesto sobre una UI ya construida) — usar `driver.js`
+  aquí para acompañar al usuario a través de "crear admin → confirmar → ir a login",
+  ya que es la primera impresión del producto y debe sentirse guiada, no un
+  formulario suelto.
+- El panel de gestión de usuarios recibe su propio tour (`driver.js`) que explique:
+  tabla de usuarios, botón "crear usuario", indicador de seats usados/disponibles,
+  columna de sesiones activas, y el flujo de desactivar/eliminar.
+- El selector de preferencias de sincronización (5.8) recibe su propio tour que
+  explique visualmente la expansión automática por FK (ej. resaltar cómo al marcar
+  `orders` se auto-marcan `customers` con una animación/indicador claro de "por
+  qué" se seleccionó, no solo que se seleccionó).
+- Requisitos de diseño transversales (aplican a toda UI nueva de Fase 5, evaluados
+  contra las Web Interface Guidelines de Vercel y el enfoque de diseño intencional
+  de Anthropic — ver skills `frontend-design` y `web-design-guidelines` instalados
+  en este entorno para consulta continua durante la implementación):
+  - **Responsive real**: probado en viewport móvil, no solo desktop (recordar el
+    bug de responsive ya corregido en la tabla de addons — no repetirlo aquí).
+  - **Accesible**: labels en todos los inputs, foco visible, botones de solo-ícono
+    con `aria-label`, confirmación (no borrado inmediato) en acciones destructivas
+    como eliminar usuario.
+  - **Feedback de carga/error consistente**: mismos patrones ya usados en
+    `trust-message` (éxito/error inline, sin alerts bloqueantes).
+  - **Vocabulario consistente**: un botón que dice "Crear usuario" debe resultar en
+    un mensaje que diga "Usuario creado", igual que ya se hace con "Trusted ‹addon›".
+  - **View Transitions**: reutilizar `withViewTransition()` ya existente para todo
+    swap de UI nuevo (tabla de usuarios, wizard de setup), consistente con el resto
+    de la Admin UI.
+
 ### Preguntas abiertas para antes de codificar
 - ¿El primer admin se crea solo vía `/admin/setup` en el navegador, o también debe
   poder crearse por variable de entorno en despliegues automatizados (Docker/CD)
@@ -151,8 +186,14 @@ modelo de usuarios ya existe de verdad)**.
 - `docs/pilot-plan.md` — actualizar una vez 5.1/5.2/5.7 estén listas, ya que cambia
   radicalmente la sección de "cómo se ve un push real" (hoy dice explícitamente que
   Dolt no se usa para el contenido transferido).
-- Admin UI: agregar los nuevos pasos (setup inicial, gestión de usuarios) al tour
-  de `driver.js` ya existente, igual que se hizo para el sistema de addons.
+- Admin UI: agregar los nuevos pasos (setup inicial, gestión de usuarios,
+  preferencias de sincronización) como tours independientes de `driver.js`, igual
+  que se hizo para el sistema de addons (una key de `localStorage` por feature).
+  Validar cada nueva pantalla contra las Web Interface Guidelines (skill
+  `web-design-guidelines`, fuente: `vercel-labs/agent-skills`) antes de mergear,
+  y aplicar el enfoque de diseño intencional del skill `frontend-design`
+  (`anthropics/skills`) para que la UI se sienta pragmática, consistente con el
+  resto de la Admin UI existente, y no como un formulario genérico pegado encima.
 - `Deltix-Client/README.md` — documentar los nuevos comandos (`branch`, `merge`,
   `log`, `diff`, flags de `push` para preferencias de sincronización) a medida que
   se agregan.
