@@ -57,6 +57,13 @@ Contexts (all implemented through Fase 4):
 2. ✅ REST Control Plane & Authentication (HonoJS)
 3. ✅ Ephemeral Tickets (2m TTL) & gRPC Engine (:50051, mTLS)
 4. ✅ Dynamic Add-on Loading (TOFU trust, closed capability list, circuit breaker)
+5. ⏳ Real Dolt Versioning, Admin User Management & Sync Preferences — planning only,
+   see [`docs/decisions/0002-phase-5-versioning-and-user-management.md`](./docs/decisions/0002-phase-5-versioning-and-user-management.md).
+   Sub-phases: 5.1 per-repo Dolt provisioning, 5.2 real commits on push, 5.3 branching,
+   5.4 merge/conflicts, 5.5 log/diff, 5.6 per-repo/branch authorization, 5.7 Admin Web UI
+   user management (create/deactivate users, active-session/seat analytics, guided
+   first-boot admin setup), 5.8 sync preferences (schema-only vs schema+data, selective
+   table sync with automatic FK-closure expansion to avoid referential corruption).
 
 Branching model: **trunk-based**, one branch per roadmap phase, merged into `main` once its
 test suite (unit + integration + smoke) is green.
