@@ -208,16 +208,28 @@ describe('orphaned repo admin backfill boot smoke test (real subprocess, real HT
     expect(res.status).toBe(201);
   });
 
-  it('leaves an already-governed repo completely untouched (fail-closed preserved)', async () => {
+  it("lets the global admin view an already-governed repo's roles too (does not grant implicit data access)", async () => {
     const res = await fetch(
       `http://127.0.0.1:${httpPort}/api/v1/versioning/repos/already-governed/roles`,
       { headers: { authorization: `Bearer ${accessToken}` } },
     );
 
-    // The bootstrap admin was never granted any role on this repo, so
-    // reading its roles is itself an access-denied case (not just an
-    // empty/different role list) -- this is the strongest proof that
-    // backfill never touches a repo that already has an owner.
+    // Global admins can now inspect/manage role assignments on ANY repo
+    // (that's the whole point of the admin Roles panel) -- but this must
+    // NOT be confused with implicit reader/writer/admin data access, which
+    // is asserted separately below.
+    expect(res.status).toBe(200);
+  });
+
+  it('does not grant the global admin implicit data access to an already-governed repo they were never assigned a role on', async () => {
+    const res = await fetch(
+      `http://127.0.0.1:${httpPort}/api/v1/versioning/repos/already-governed/branches`,
+      { headers: { authorization: `Bearer ${accessToken}` } },
+    );
+
+    // Reading repo *data* (branches, commits, diffs, etc.) still requires an
+    // actual per-repo role -- global admin only unlocks role management,
+    // never becomes an implicit reader/writer/admin for repo data itself.
     expect(res.status).toBe(403);
   });
 });
