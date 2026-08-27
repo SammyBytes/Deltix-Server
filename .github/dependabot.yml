@@ -1,0 +1,42 @@
+version: 2
+updates:
+  # npm/bun ecosystem — root package.json + workspaces (packages/addon-sdk)
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 10
+    labels:
+      - "dependencies"
+    groups:
+      # Batch non-major bumps into a single PR to cut down on review noise;
+      # majors get their own PR since they're more likely to need a manual
+      # look (breaking changes).
+      minor-and-patch:
+        update-types:
+          - "minor"
+          - "patch"
+    commit-message:
+      prefix: "chore(deps)"
+
+  # GitHub Actions workflow dependencies (actions/checkout, docker/* etc.)
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    labels:
+      - "dependencies"
+      - "ci"
+    commit-message:
+      prefix: "chore(ci)"
+
+  # Base images referenced in the Dockerfile (oven/bun, debian).
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    labels:
+      - "dependencies"
+      - "docker"
+    commit-message:
+      prefix: "chore(docker)"

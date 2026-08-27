@@ -1,0 +1,18 @@
+name: Feature request
+description: Suggest an addition or change to Deltix-Server.
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What problem are you trying to solve? Who is affected?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: What would you like to happen? Note any licensing tier implications (Community vs Enterprise).
+    validations:
+      required: false

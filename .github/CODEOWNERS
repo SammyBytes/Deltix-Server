@@ -1,0 +1,13 @@
+# Default owner for everything unless a more specific rule below matches.
+* @SammyBytes
+
+# Licensing and anti-tamper are the most security-critical contexts —
+# flagged explicitly so changes here are never accidentally rubber-stamped.
+/src/contexts/licensing/ @SammyBytes
+/src/contexts/auth/ @SammyBytes
+/src/contexts/addons/ @SammyBytes
+
+# CI/CD and Docker changes affect what actually runs in the pilot/production
+# environment — treat as sensitive as application code.
+/.github/workflows/ @SammyBytes
+/Dockerfile @SammyBytes

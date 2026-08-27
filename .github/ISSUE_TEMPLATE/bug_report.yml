@@ -1,0 +1,37 @@
+name: Bug report
+description: Something in Deltix-Server isn't working as expected.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Security vulnerability?** Do not file it here — use the
+        [Security tab](../../security/advisories/new) for private reporting
+        instead (see `SECURITY.md`).
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: A clear description of the bug and what you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: Minimal steps, including relevant env vars (redact secrets!) and license tier.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version / commit
+      description: Output of `git rev-parse HEAD` or the Docker image tag used.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: Paste relevant server logs (pino JSON output). Redact license keys, JWT keys, and any customer data.
+      render: json
