@@ -20,7 +20,12 @@ function createRepoStore(): RepoStore {
     list: async () => [...repos.values()],
     getSyncPreference: async (repoId) => prefs.get(repoId) ?? null,
     upsertSyncPreference: async (params) => {
-      prefs.set(params.repoId, { mode: params.mode, requestedTables: params.requestedTables });
+      prefs.set(params.repoId, {
+        mode: params.mode,
+        requestedTables: params.requestedTables,
+        createdAt: params.createdAt,
+        updatedAt: params.updatedAt,
+      });
     },
   };
 }
@@ -93,9 +98,41 @@ describe('versioning/SyncPreferenceService', () => {
     const saved = await store.getSyncPreference('demo');
     const validated = await service.validatePushOptions('demo');
 
-    expect(saved).toEqual({ mode: 'schema_only', requestedTables: ['customers', 'orders'] });
+    expect(saved).toEqual({
+      mode: 'schema_only',
+      requestedTables: ['customers', 'orders'],
+      createdAt: 1234,
+      updatedAt: 1234,
+    });
     expect(validated.resolvedTables).toEqual(['customers', 'orders']);
     expect(validated.mode).toBe('schema_only');
+  });
+
+  it('get() returns the real stored createdAt/updatedAt timestamps, not a hardcoded 0 (audit trail integrity)', async () => {
+    const store = createRepoStore();
+    await store.create({
+      repoId: 'demo',
+      doltPath: '/repos/demo',
+      createdAt: 1,
+      createdBy: 'seed',
+    });
+    let now = 5000;
+    const service = new SyncPreferenceService(
+      store,
+      async () => [],
+      () => now,
+    );
+
+    await service.upsert('demo', { mode: 'schema_only', tables: null });
+    const firstGet = await service.get('demo');
+    expect(firstGet?.createdAt).toBe(5000);
+    expect(firstGet?.updatedAt).toBe(5000);
+
+    now = 9000;
+    await service.upsert('demo', { mode: 'schema_and_data', tables: null });
+    const secondGet = await service.get('demo');
+    expect(secondGet?.createdAt).toBe(9000);
+    expect(secondGet?.updatedAt).toBe(9000);
   });
 
   it('applies request-time overrides instead of stored preferences, then revalidates closure', async () => {

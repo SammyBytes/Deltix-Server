@@ -5,6 +5,39 @@ All notable changes to Deltix-Server are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.2] - 2026-08-27
+
+### Security
+
+- **CRITICAL: RBAC bypass on the gRPC transfer path.** `POST
+  /api/v1/transfer/push/ticket` (and the equivalent pull-ticket path) issued
+  ephemeral transfer tickets to any authenticated user regardless of their
+  repo role, because the gRPC streaming layer trusts any ticket handed to it
+  and performs no authorization of its own — the HTTP ticket-issuance
+  endpoint was the only place a role check could ever happen, and it had
+  none. A user with only `reader` access to a repo could therefore push
+  (write) to it. Fixed by adding a `MINIMUM_ROLE_FOR_OPERATION` map
+  (`push` -> `writer`, `pull` -> `reader`) checked via the existing
+  `authService.getRepoRole()` before any ticket is issued; insufficient or
+  missing role now returns `403` and no ticket is created. Added explicit
+  regression-guard tests asserting a `reader` can never obtain a push
+  ticket.
+
+### Fixed
+
+- **Sync-preference `dry-run` ignored the stored preference mode.** Root
+  cause was actually in Deltix-Client (see its own changelog): the CLI's
+  `sync-prefs dry-run` subcommand hardcoded `schema_and_data` instead of
+  reading the previously saved mode, risking unexpected full-data dry-runs
+  against a repo explicitly configured for `schema_only` sync.
+- **Sync-preference timestamps were always reported as `0`.**
+  `GET /api/v1/repos/:repo/sync-preferences` returned `createdAt: 0,
+  updatedAt: 0` for every repo instead of the real values, because
+  `RepoSyncPreferenceSummary` never carried timestamps and the libSQL store
+  never read the `created_at`/`updated_at` columns it already persisted.
+  Both are now read from storage and returned as-is, restoring audit
+  traceability for sync-preference changes.
+
 ## [0.2.1] - 2026-08-27
 
 ### Fixed

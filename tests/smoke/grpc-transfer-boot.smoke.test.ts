@@ -78,6 +78,29 @@ describe('gRPC transfer engine boot smoke test (real subprocess, real TLS, real 
       { username: 'alice', passwordHash: await hashPassword('s3cret-pass') },
     ]);
 
+    // Repo RBAC is now enforced at ticket-issuance time: seed alice as a
+    // real user row (FK target for repo_roles) with admin on the repo this
+    // test pushes/pulls, since DELTIX_LOCAL_USERS carries no repo roles.
+    const userDbPath = join(await mkdtemp(join(tmpdir(), 'deltix-users-')), 'users.db');
+    const { LibsqlUserStore } = await import('../../src/contexts/auth/libsql-user-store');
+    const userStore = new LibsqlUserStore(userDbPath);
+    await userStore.init();
+    await userStore.create({
+      username: 'alice',
+      passwordHash: await hashPassword('s3cret-pass'),
+      createdAt: Date.now(),
+      createdBy: 'test-seed',
+      active: true,
+      lastLoginAt: null,
+    });
+    await userStore.upsertRepoRole({
+      username: 'alice',
+      repoId: 'org/e2e-smoke-repo',
+      role: 'admin',
+      grantedAt: Date.now(),
+      grantedBy: 'test-seed',
+    });
+
     proc = Bun.spawn(['bun', 'run', ENTRYPOINT], {
       env: {
         ...process.env,
@@ -88,6 +111,7 @@ describe('gRPC transfer engine boot smoke test (real subprocess, real TLS, real 
         DELTIX_JWT_PRIVATE_KEY: jwtPrivateKeyPem,
         DELTIX_JWT_PUBLIC_KEY: jwtPublicKeyPem,
         DELTIX_LOCAL_USERS: localUsers,
+        DELTIX_USER_DB_PATH: userDbPath,
         DELTIX_SESSION_DB_PATH: sessionDbPath,
         DELTIX_TICKET_DB_PATH: ticketDbPath,
         DELTIX_TICKET_TTL_SECONDS: '120',

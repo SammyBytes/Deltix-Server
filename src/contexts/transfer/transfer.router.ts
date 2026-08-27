@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
 import { createLogger } from '../../shared/logger';
-import type { AuthService } from '../auth';
+import type { AuthService, RepoRole } from '../auth';
 import {
   TicketAlreadyConsumedError,
   TicketExpiredError,
@@ -12,6 +12,17 @@ import type { TicketService } from './ticket.service';
 import type { PushTicketSyncOptions } from './types';
 
 const logger = createLogger('http:transfer');
+const ROLE_RANK: Record<RepoRole, number> = { reader: 1, writer: 2, admin: 3 };
+// Push mutates the repo's data, so it requires at least `writer`; pull is
+// read-only and only requires `reader`. This is the ticket-issuance-time
+// enforcement point for repo RBAC on the transfer/gRPC path — the gRPC
+// streaming layer itself never re-checks roles, it only trusts that a
+// ticket was issued for a (username, operation, repo) tuple that already
+// passed this check, so this MUST NOT be skipped or weakened.
+const MINIMUM_ROLE_FOR_OPERATION: Record<'push' | 'pull', RepoRole> = {
+  push: 'writer',
+  pull: 'reader',
+};
 
 const syncOptionsSchema = z
   .object({
@@ -81,6 +92,25 @@ export function createTransferRouter(authService: AuthService, ticketService: Ti
     const parsed = issueTicketBodySchema.safeParse(await c.req.json().catch(() => null));
     if (!parsed.success) {
       return c.json({ error: 'Invalid request body' }, 400);
+    }
+
+    // Every ticket-issuing request must be checked against the caller's
+    // actual repo role here — this is the only authorization gate for the
+    // gRPC transfer path, since the streaming layer itself trusts any
+    // ticket it's handed. A `reader` must never be able to obtain a push
+    // ticket (write access), even though the HTTP layer for other
+    // endpoints separately enforces its own role checks.
+    const minimumRole = MINIMUM_ROLE_FOR_OPERATION[parsed.data.operation];
+    const role = await authService.getRepoRole(username, parsed.data.repo);
+    if (!role || ROLE_RANK[role] < ROLE_RANK[minimumRole]) {
+      logger.warn(
+        { username, operation: parsed.data.operation, repo: parsed.data.repo, role },
+        'Transfer ticket request denied: insufficient repo role',
+      );
+      return c.json(
+        { error: `User ${username} lacks ${minimumRole} access to repo ${parsed.data.repo}` },
+        403,
+      );
     }
 
     const syncOptions =

@@ -336,6 +336,30 @@ describe('versioning/versioning.router (integration, real HTTP requests via Hono
       expect(body.preference.requestedTables).toEqual(['customers', 'orders']);
     });
 
+    it('round-trips real createdAt/updatedAt timestamps through the libSQL-backed store (audit trail integrity)', async () => {
+      const token = await loginAndGetAccessToken();
+      await provisionRepoAsAlice('demo-repo');
+      const before = Date.now();
+
+      const putRes = await app.request('/repos/demo-repo/sync-preferences', {
+        method: 'PUT',
+        headers: { authorization: ['Bearer ', token].join(''), 'content-type': 'application/json' },
+        body: JSON.stringify({ mode: 'schema_only', tables: null }),
+      });
+      expect(putRes.status).toBe(200);
+
+      const getRes = await app.request('/repos/demo-repo/sync-preferences', {
+        headers: { authorization: ['Bearer ', token].join('') },
+      });
+      expect(getRes.status).toBe(200);
+      const body = (await getRes.json()) as {
+        preference: { createdAt: number; updatedAt: number } | null;
+      };
+      expect(body.preference).not.toBeNull();
+      expect(body.preference?.createdAt).toBeGreaterThanOrEqual(before);
+      expect(body.preference?.updatedAt).toBeGreaterThanOrEqual(before);
+    });
+
     it('fails closed with 409 when the client excludes FK-required tables', async () => {
       const token = await loginAndGetAccessToken();
       await provisionRepoAsAlice('demo-repo');

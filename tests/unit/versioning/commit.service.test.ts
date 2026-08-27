@@ -36,6 +36,8 @@ class InMemoryRepoStore implements RepoStore {
     this.syncPreferences.set(params.repoId, {
       mode: params.mode,
       requestedTables: params.requestedTables,
+      createdAt: params.createdAt,
+      updatedAt: params.updatedAt,
     });
   }
 }

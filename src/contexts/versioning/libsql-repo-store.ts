@@ -64,7 +64,7 @@ export class LibsqlRepoStore implements RepoStore {
 
   async getSyncPreference(repoId: string): Promise<RepoSyncPreferenceSummary | null> {
     const result = await this.client.execute({
-      sql: `SELECT mode, requested_tables_json FROM repo_sync_preferences WHERE repo_id = ?`,
+      sql: `SELECT mode, requested_tables_json, created_at, updated_at FROM repo_sync_preferences WHERE repo_id = ?`,
       args: [repoId],
     });
     const row = result.rows[0];
@@ -77,6 +77,8 @@ export class LibsqlRepoStore implements RepoStore {
         typeof row.requested_tables_json === 'string'
           ? ((JSON.parse(row.requested_tables_json) as string[] | null) ?? null)
           : null,
+      createdAt: Number(row.created_at),
+      updatedAt: Number(row.updated_at),
     };
   }
 

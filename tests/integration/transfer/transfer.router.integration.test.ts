@@ -68,6 +68,10 @@ describe('transfer/transfer.router (integration, real HTTP requests via Hono.fet
     return accessToken;
   }
 
+  async function grantRole(username: string, repoId: string, role: 'reader' | 'writer' | 'admin') {
+    await authService.grantRepoRole({ username, repoId, role, grantedBy: 'test-seed' });
+  }
+
   describe('POST /push/ticket', () => {
     it('rejects requests with no Authorization header', async () => {
       const res = await app.request('/push/ticket', {
@@ -113,8 +117,91 @@ describe('transfer/transfer.router (integration, real HTTP requests via Hono.fet
       expect(res.status).toBe(400);
     });
 
+    it('rejects a push-ticket request from a user with no repo role at all (fail-closed)', async () => {
+      const accessToken = await loginAndGetAccessToken();
+      const res = await app.request('/push/ticket', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          authorization: ['Bearer ', accessToken].join(''),
+        },
+        body: JSON.stringify({ operation: 'push', repo: 'org/repo' }),
+      });
+      expect(res.status).toBe(403);
+    });
+
+    it('rejects a push-ticket request from a reader (security regression guard: readers must never obtain write access via the gRPC transfer path)', async () => {
+      const accessToken = await loginAndGetAccessToken();
+      await grantRole('alice', 'org/repo', 'reader');
+      const res = await app.request('/push/ticket', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          authorization: ['Bearer ', accessToken].join(''),
+        },
+        body: JSON.stringify({ operation: 'push', repo: 'org/repo' }),
+      });
+      expect(res.status).toBe(403);
+    });
+
+    it('allows a reader to obtain a pull ticket (read-only operation)', async () => {
+      const accessToken = await loginAndGetAccessToken();
+      await grantRole('alice', 'org/repo', 'reader');
+      const res = await app.request('/push/ticket', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          authorization: ['Bearer ', accessToken].join(''),
+        },
+        body: JSON.stringify({ operation: 'pull', repo: 'org/repo' }),
+      });
+      expect(res.status).toBe(201);
+    });
+
+    it('rejects a pull-ticket request from a user with no repo role at all (fail-closed)', async () => {
+      const accessToken = await loginAndGetAccessToken();
+      const res = await app.request('/push/ticket', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          authorization: ['Bearer ', accessToken].join(''),
+        },
+        body: JSON.stringify({ operation: 'pull', repo: 'org/repo' }),
+      });
+      expect(res.status).toBe(403);
+    });
+
+    it('allows a writer to obtain a push ticket', async () => {
+      const accessToken = await loginAndGetAccessToken();
+      await grantRole('alice', 'org/repo', 'writer');
+      const res = await app.request('/push/ticket', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          authorization: ['Bearer ', accessToken].join(''),
+        },
+        body: JSON.stringify({ operation: 'push', repo: 'org/repo' }),
+      });
+      expect(res.status).toBe(201);
+    });
+
+    it('allows a repo admin to obtain a push ticket (role hierarchy: admin implies writer)', async () => {
+      const accessToken = await loginAndGetAccessToken();
+      await grantRole('alice', 'org/repo', 'admin');
+      const res = await app.request('/push/ticket', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          authorization: ['Bearer ', accessToken].join(''),
+        },
+        body: JSON.stringify({ operation: 'push', repo: 'org/repo' }),
+      });
+      expect(res.status).toBe(201);
+    });
+
     it('issues a ticket for a valid authenticated request', async () => {
       const accessToken = await loginAndGetAccessToken();
+      await grantRole('alice', 'org/repo', 'writer');
       const res = await app.request('/push/ticket', {
         method: 'POST',
         headers: {
@@ -139,6 +226,7 @@ describe('transfer/transfer.router (integration, real HTTP requests via Hono.fet
 
     it('allows clients to send per-push sync overrides on the ticket request', async () => {
       const accessToken = await loginAndGetAccessToken();
+      await grantRole('alice', 'org/repo', 'writer');
       const res = await app.request('/push/ticket', {
         method: 'POST',
         headers: {
@@ -174,6 +262,7 @@ describe('transfer/transfer.router (integration, real HTTP requests via Hono.fet
 
     it('returns 404 when closing a ticket that was never activated', async () => {
       const accessToken = await loginAndGetAccessToken();
+      await grantRole('alice', 'org/repo', 'writer');
       const issueRes = await app.request('/push/ticket', {
         method: 'POST',
         headers: {
@@ -198,6 +287,7 @@ describe('transfer/transfer.router (integration, real HTTP requests via Hono.fet
 
   it('full lifecycle: issue -> (simulated gRPC activation) -> close via REST', async () => {
     const accessToken = await loginAndGetAccessToken();
+    await grantRole('alice', 'org/repo', 'writer');
 
     const issueRes = await app.request('/push/ticket', {
       method: 'POST',
@@ -226,6 +316,7 @@ describe('transfer/transfer.router (integration, real HTTP requests via Hono.fet
 
   it('concurrency: only one of many parallel gRPC-activation attempts on the same ticket wins, even racing against real HTTP-issued tickets', async () => {
     const accessToken = await loginAndGetAccessToken();
+    await grantRole('alice', 'org/repo', 'writer');
 
     const issueRes = await app.request('/push/ticket', {
       method: 'POST',

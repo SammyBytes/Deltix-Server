@@ -80,8 +80,8 @@ export class SyncPreferenceService {
       repoId,
       mode: stored.mode,
       requestedTables: stored.requestedTables,
-      createdAt: 0,
-      updatedAt: 0,
+      createdAt: stored.createdAt,
+      updatedAt: stored.updatedAt,
     };
   }
 

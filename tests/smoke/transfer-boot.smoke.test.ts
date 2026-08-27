@@ -34,6 +34,7 @@ describe('transfer boot smoke test (real subprocess, real HTTP server, real tick
   beforeAll(async () => {
     repoPath = await initTempDoltRepo();
     const sessionDbPath = join(await mkdtemp(join(tmpdir(), 'deltix-sessions-')), 'sessions.db');
+    const userDbPath = join(await mkdtemp(join(tmpdir(), 'deltix-users-')), 'users.db');
     const ticketDbPath = join(await mkdtemp(join(tmpdir(), 'deltix-tickets-')), 'tickets.db');
     httpPort = 24000 + Math.floor(Math.random() * 5000);
     const certDir = await mkdtemp(join(tmpdir(), 'deltix-grpc-certs-transfer-'));
@@ -47,6 +48,32 @@ describe('transfer boot smoke test (real subprocess, real HTTP server, real tick
       { username: 'alice', passwordHash: await hashPassword('s3cret-pass') },
     ]);
 
+    // Repo RBAC is now enforced at ticket-issuance time (transfer.router.ts):
+    // a caller needs `writer` for push and `reader` for pull on the target
+    // repo. Seed alice as a real user row (FK target for repo_roles) with
+    // admin on both repos this test exercises before boot, since
+    // DELTIX_LOCAL_USERS itself carries no repo roles.
+    const { LibsqlUserStore } = await import('../../src/contexts/auth/libsql-user-store');
+    const userStore = new LibsqlUserStore(userDbPath);
+    await userStore.init();
+    await userStore.create({
+      username: 'alice',
+      passwordHash: await hashPassword('s3cret-pass'),
+      createdAt: Date.now(),
+      createdBy: 'test-seed',
+      active: true,
+      lastLoginAt: null,
+    });
+    for (const repoId of ['org/repo', 'org/other-repo']) {
+      await userStore.upsertRepoRole({
+        username: 'alice',
+        repoId,
+        role: 'admin',
+        grantedAt: Date.now(),
+        grantedBy: 'test-seed',
+      });
+    }
+
     proc = Bun.spawn(['bun', 'run', ENTRYPOINT], {
       env: {
         ...process.env,
@@ -57,6 +84,7 @@ describe('transfer boot smoke test (real subprocess, real HTTP server, real tick
         DELTIX_JWT_PRIVATE_KEY: jwtPrivateKeyPem,
         DELTIX_JWT_PUBLIC_KEY: jwtPublicKeyPem,
         DELTIX_LOCAL_USERS: localUsers,
+        DELTIX_USER_DB_PATH: userDbPath,
         DELTIX_SESSION_DB_PATH: sessionDbPath,
         DELTIX_TICKET_DB_PATH: ticketDbPath,
         DELTIX_TICKET_TTL_SECONDS: '120',
@@ -70,7 +98,7 @@ describe('transfer boot smoke test (real subprocess, real HTTP server, real tick
       stderr: 'pipe',
     });
 
-    await new Promise((resolve) => setTimeout(resolve, 800));
+    await new Promise((resolve) => setTimeout(resolve, 1500));
 
     const loginRes = await fetch(`http://127.0.0.1:${httpPort}/api/v1/auth/login`, {
       method: 'POST',
