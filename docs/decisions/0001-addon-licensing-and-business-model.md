@@ -1,7 +1,8 @@
 # ADR 0001: Addon Licensing & Business Model (Fase 4 groundwork)
 
-- **Status**: Draft — under discussion, NOT approved, NOT implemented.
-- **Date**: 2026-08-26
+- **Status**: **Accepted** — Fase 4 implementation authorized. See §9 for the final
+  resolution of every open decision.
+- **Date**: 2026-08-26 (Draft) / 2026-08-26 (Accepted)
 - **Owner**: @SammyBytes
 - **Scope**: Deltix-Server only (Deltix-Client stays MIT/free, unaffected by this ADR).
 - **Related**: Fase 1 (`src/contexts/licensing`), Fase 4 (not started — this ADR is the
@@ -171,23 +172,20 @@ listener starts" boot-sequence discipline already established in `src/index.ts`.
 
 ---
 
-## 6. Open decisions (need the user's input before Fase 4 starts)
+## 6. Open decisions — RESOLVED (see §9 for the final answers)
 
-These are explicitly **not decided yet** — tracked here so nothing gets assumed silently:
+The five questions originally listed here were resolved by the user on 2026-08-26.
+Kept for historical context; the binding answers are in §9.
 
-1. **Which specific addons will be official-free vs official-paid at launch?**
-   (Needs an actual addon roadmap/backlog — none exists yet.)
-2. **Pricing model for paid official addons**: bundled into higher license tiers
-   (e.g. "Enterprise" tier includes SSO+audit) vs. à la carte per-addon pricing?
-3. **Community addon distribution channel**: is there a registry at all for Fase 4,
-   or do community addons start as "bring your own file path" (simplest possible
-   MVP — no registry, no discovery UI, just a manifest + signature + local
-   filesystem path) until there's real demand?
-4. **"Verified" review program**: free goodwill program, paid certification, or not
-   offered at all initially?
-5. **Addon SDK/contract license**: confirmed direction is MIT (matches Client), but
-   needs explicit sign-off since it affects how freely community authors can build
-   against it.
+1. Which specific addons will be official-free vs official-paid at launch? →
+   resolved by adopting a **bundled tier model** instead of per-addon pricing (§9.1).
+2. Pricing model for paid official addons? → **bundled into the Enterprise tier**,
+   not à la carte (§9.1).
+3. Community addon distribution channel? → **local filesystem path only** ("Bring
+   Your Own File Path"), no registry, no marketplace, for the whole of Fase 4 (§9.2).
+4. "Verified" review program? → **explicit non-goal for Fase 4** (§9.6).
+5. Addon SDK/contract license? → **MIT**, published as an independent workspace
+   package `packages/addon-sdk` inside this repo (§9.2).
 
 ---
 
@@ -204,6 +202,104 @@ These are explicitly **not decided yet** — tracked here so nothing gets assume
 
 ## 8. Next steps
 
-Fase 4 implementation **must not start** until the "Open decisions" in §6 are
-resolved by the user. When resolved, update this ADR's Status to "Accepted", record
-the answers inline, and only then create the Fase 4 implementation todos.
+Fase 4 implementation is now authorized (see §9). Implementation order:
+
+1. Configure Bun workspaces + scaffold `packages/addon-sdk` (pure contract, MIT).
+2. Extend the Ed25519 license parser/types to validate the `addons` payload object.
+3. Add the `addon_trust_store` libSQL table + repository (TOFU key persistence).
+4. Implement the fail-closed dynamic addon loader (signature → manifest → license →
+   `import()`), with per-addon error-boundary + circuit breaker at runtime.
+
+Full TDD (unit + integration + smoke) is mandatory for every step, per the project's
+existing testing discipline (Fases 1-3).
+
+---
+
+## 9. Final resolution (binding — 2026-08-26)
+
+This section is the single source of truth for Fase 4's addon model. Anything in
+§§1-7 that conflicts with this section is superseded by this section.
+
+### 9.1 License tiers
+
+Every Deltix-Server instance **requires** a signed Ed25519 license payload — no
+unlicensed/no-license mode exists, preserving Fase 1's fail-closed boot invariant
+with zero exceptions.
+
+| Tier | Cost | `addons` payload defaults |
+|---|---|---|
+| **Community** | Free (still requires a signed `tier: "community"` payload) | `communityAddonsEnabled: true`, `maxCommunityAddons: 10`, `official: []` (free official addons are always available regardless of this list — see §3.1) |
+| **Enterprise** | Paid | `communityAddonsEnabled: true`, `maxCommunityAddons: null` (unlimited), `official: [...]` bundled Enterprise addon set (SSO/SAML 2.0, compliance audit logs, advanced RBAC, HA/clustering) |
+
+Pricing is **bundled**, not à la carte: Enterprise tier unlocks the whole official
+Enterprise addon bundle as one commercial SKU. No per-addon purchase flow in Fase 4.
+
+### 9.2 SDK & distribution
+
+- Repo adopts **Bun workspaces** (`"workspaces": ["packages/*"]` in the root
+  `package.json`).
+- `packages/addon-sdk/` is an independent package: its own `package.json`
+  (`"license": "MIT"`) and a physical `LICENSE` file (MIT text). It is a **pure
+  contract** — TypeScript types/interfaces + a manifest zod schema only. It must
+  contain **zero imports from `src/`** (the BSL core). This is enforced by a
+  lint/test check, not just convention, so the boundary can't silently rot.
+- Community addon distribution is **local filesystem path only** ("Bring Your Own
+  File Path") for the entire scope of Fase 4. No registry, no marketplace, no
+  package manager integration, no payment processing.
+
+### 9.3 Addon signing & trust (TOFU)
+
+- **Official addons**: signed with the Deltix-controlled Ed25519 key (the same key
+  family/infrastructure as the Fase 1 license signer, `src/contexts/licensing`).
+- **Community addons**: signed by the author's own Ed25519 key. Trust-On-First-Use —
+  the admin registers `(addonName, authorPublicKey)` once, persisted in a new libSQL
+  table:
+
+  ```sql
+  CREATE TABLE addon_trust_store (
+    addon_name TEXT PRIMARY KEY,
+    author_public_key TEXT NOT NULL,
+    trusted_at INTEGER NOT NULL,
+    trusted_by TEXT NOT NULL
+  );
+  ```
+
+  On every boot, the loader re-verifies the addon package's signature against the
+  stored key. A key mismatch (author rotated keys without re-trust, or a tampered
+  package) fails closed — the addon does not load.
+
+### 9.4 Manifest & closed permission list
+
+`addon.manifest.json` declares a `capabilities: string[]` field. Fase 4 ships with
+exactly **four** closed capability strings — no open/extensible permission system:
+
+1. `http:route` — register HTTP endpoints (HonoJS).
+2. `db:read` — read access to the data layer.
+3. `db:write` — write/mutate access to the data layer.
+4. `nas:read` — read access to local/NAS storage.
+
+Requesting any capability outside this list **aborts boot-time loading** of that
+addon (fail closed, no partial load). Official addons are implicitly fully trusted
+(no manifest permission prompt) since Deltix already reviewed them; community
+addons must always declare capabilities explicitly.
+
+### 9.5 Runtime isolation
+
+Every addon-registered HTTP route or lifecycle hook runs inside an **error-boundary
+wrapper**. A simple in-memory circuit breaker counts consecutive failures per addon;
+after N consecutive failures, that addon is disabled in memory for the remainder of
+the process's lifetime (requires a server restart to re-enable — no live
+re-enable/admin toggle in Fase 4, kept deliberately simple).
+
+### 9.6 Explicit non-goals for Fase 4
+
+- No "Verified" community review/certification program (may be revisited once a
+  real community of addon authors exists).
+- No addon marketplace/registry service.
+- No payment processing for addons (Enterprise tier billing is out-of-band, same as
+  today's license issuance process).
+- No revenue-share automation.
+- No sandboxing beyond signature-gate + closed-capability manifest (i.e. not a full
+  VM/container/subprocess isolation boundary — reassess if a real incident or
+  enterprise requirement demands it).
+- No live re-enable of a circuit-broken addon without a server restart.
