@@ -32,6 +32,12 @@ sección 0).
   independientes. El creador de un repo queda `admin` automáticamente.
   Fail-closed: sin rol asignado no hay acceso, ni siquiera de lectura.
   Gestionar roles desde la Admin UI o `deltix roles list|grant|revoke`.
+  Recuperación: si un repo queda huérfano (cero roles asignados, p. ej.
+  provisionado antes de que existiera el control de acceso por repo), el
+  boot lo rescata automáticamente otorgando `admin` al bootstrap-admin
+  (`DELTIX_BOOTSTRAP_ADMIN_USERNAME`) — nunca toca un repo que ya tiene
+  algún rol asignado, así que no puede sobrescribir en silencio la
+  propiedad de un repo ya gobernado.
 - **Preferencias de sync**: antes del piloto, definir con el equipo si
   cada repo sincroniza solo schema o schema+data, y qué tablas (las
   relacionadas por FK se incluyen automáticamente para evitar corrupción

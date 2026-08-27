@@ -5,6 +5,20 @@ All notable changes to Deltix-Server are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.1] - 2026-08-27
+
+### Fixed
+
+- **Orphaned-repo admin lockout**: a repo left with zero role assignments (e.g.
+  provisioned before per-repo authorization existed, or via any path that
+  bypassed `POST /repos`) had no self-service recovery — fail-closed access
+  control meant nobody, not even the bootstrap admin, could grant themselves
+  a role. `AuthService.backfillOrphanedRepoAdmin` now runs at boot for every
+  repo when `DELTIX_BOOTSTRAP_ADMIN_USERNAME` is set, granting admin only to
+  repos with **zero** existing roles — an already-governed repo is always
+  left untouched. Each repo is backfilled independently so a single
+  problematic repo can never abort the whole boot sequence.
+
 ## [0.2.0] - 2026-08-27
 
 ### Added — Fase 5: Dolt-backed versioning
