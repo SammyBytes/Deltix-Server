@@ -1,9 +1,16 @@
-import { afterEach, describe, expect, it } from 'bun:test';
-import { rm } from 'node:fs/promises';
+import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { LibsqlUserStore } from '../../../src/contexts/auth/libsql-user-store';
 
 describe('auth/libsql-user-store (integration, real libSQL file)', () => {
-  const dbPath = 'scratch/auth-users-store.db';
+  let dbPath: string;
+
+  beforeEach(async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'deltix-user-store-'));
+    dbPath = join(dir, 'auth-users-store.db');
+  });
 
   afterEach(async () => {
     await rm(dbPath, { force: true });
