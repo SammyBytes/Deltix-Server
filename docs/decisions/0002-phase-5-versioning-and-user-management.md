@@ -211,7 +211,7 @@ modelo de usuarios ya existe de verdad)**.
 
 | Sub-fase | Estado |
 |---|---|
-| 5.1 | ⏳ No iniciada — pendiente autorización explícita |
+| 5.1 | ✅ Completa — `contexts/versioning` (RepoProvisioningService + LibsqlRepoStore + `dolt init` real vía Bun.$ + router JWT-autenticado `/api/v1/versioning/repos`); 25 tests (unit+integration+smoke) en verde |
 | 5.2 | ⏳ No iniciada |
 | 5.3 | ⏳ No iniciada |
 | 5.4 | ⏳ No iniciada |
