@@ -16,6 +16,7 @@ import {
   discoverAndLoadAddons,
 } from './contexts/addons';
 import { createAdminUiRouter } from './contexts/admin-ui';
+import type { AuthService } from './contexts/auth';
 import { createAuthRouter, createAuthService } from './contexts/auth';
 import { createLicenseValidator, resolveLicenseAddonsConfig } from './contexts/licensing';
 import {
@@ -25,12 +26,49 @@ import {
   startGrpcTransferEngine,
 } from './contexts/storage';
 import { createTicketService, createTransferRouter } from './contexts/transfer';
+import type { RepoProvisioningService } from './contexts/versioning';
 import { createVersioningRouter, createVersioningServices } from './contexts/versioning';
 import { loadEnv } from './shared/env';
 import { createLogger } from './shared/logger';
 import { applySecurityMiddleware } from './shared/security-middleware';
 
 const logger = createLogger('boot');
+
+/**
+ * Break-glass recovery for repos left with zero role assignments (see
+ * AuthService.backfillOrphanedRepoAdmin) -- e.g. a repo provisioned before
+ * per-repo authorization existed. Only runs when a bootstrap admin is
+ * configured, and only touches repos with NO existing role, never a repo
+ * that already has an owner (fail-closed access control is otherwise
+ * preserved). A single problematic repo must never abort the entire boot
+ * sequence, so each repo is backfilled independently.
+ */
+async function backfillOrphanedRepoAdmins(
+  authService: AuthService,
+  repoProvisioningService: RepoProvisioningService,
+  bootstrapAdminUsername: string,
+): Promise<void> {
+  const allRepos = await repoProvisioningService.list();
+  for (const repo of allRepos) {
+    try {
+      const rescued = await authService.backfillOrphanedRepoAdmin(
+        repo.repoId,
+        bootstrapAdminUsername,
+      );
+      if (rescued) {
+        logger.warn(
+          { repoId: repo.repoId, username: rescued.username },
+          'Orphaned repo (no role assignments) rescued by granting admin to the bootstrap admin',
+        );
+      }
+    } catch (err) {
+      logger.error(
+        { repoId: repo.repoId, err },
+        'Failed to backfill orphaned repo admin, skipping this repo',
+      );
+    }
+  }
+}
 
 async function main(): Promise<void> {
   const validator = createLicenseValidator();
@@ -57,6 +95,15 @@ async function main(): Promise<void> {
     diffService,
     syncPreferenceService,
   } = await createVersioningServices(env);
+
+  if (env.DELTIX_BOOTSTRAP_ADMIN_USERNAME) {
+    await backfillOrphanedRepoAdmins(
+      authService,
+      repoProvisioningService,
+      env.DELTIX_BOOTSTRAP_ADMIN_USERNAME,
+    );
+  }
+
   const secureCookies = env.NODE_ENV === 'production';
   const authRouter = createAuthRouter(authService, secureCookies);
   const transferRouter = createTransferRouter(authService, ticketService);

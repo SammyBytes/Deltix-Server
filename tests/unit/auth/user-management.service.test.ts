@@ -8,6 +8,7 @@ import {
   UserNotFoundError,
 } from '../../../src/contexts/auth/errors';
 import type { SessionStore } from '../../../src/contexts/auth/session-store';
+import type { RepoRoleAssignment } from '../../../src/contexts/auth/types';
 import type { UserRecord, UserStore } from '../../../src/contexts/auth/user-store';
 import { generateTestJwtKeypairPem } from '../../fixtures/license-fixtures';
 
@@ -43,6 +44,8 @@ function createInMemorySessionStore(): SessionStore {
 
 function createInMemoryUserStore(): UserStore {
   const users = new Map<string, UserRecord>();
+  const repoRoles = new Map<string, RepoRoleAssignment>();
+  const repoRoleKey = (username: string, repoId: string) => `${username}::${repoId}`;
   let setupWinner = false;
   return {
     async init() {},
@@ -91,15 +94,19 @@ function createInMemoryUserStore(): UserStore {
     async legacyUsers() {
       return [];
     },
-    async getRepoRole() {
-      return null;
+    async getRepoRole(username, repoId) {
+      return repoRoles.get(repoRoleKey(username, repoId))?.role ?? null;
     },
-    async listRepoRoles() {
-      return [];
+    async listRepoRoles(repoId) {
+      return Array.from(repoRoles.values())
+        .filter((assignment) => assignment.repoId === repoId)
+        .sort((a, b) => a.username.localeCompare(b.username));
     },
-    async upsertRepoRole() {},
-    async deleteRepoRole() {
-      return false;
+    async upsertRepoRole(assignment) {
+      repoRoles.set(repoRoleKey(assignment.username, assignment.repoId), assignment);
+    },
+    async deleteRepoRole(username, repoId) {
+      return repoRoles.delete(repoRoleKey(username, repoId));
     },
   };
 }
@@ -225,5 +232,41 @@ describe('auth/AuthService user management', () => {
   it('throws UserNotFoundError for updates on an unknown user', async () => {
     const { service } = await createService();
     await expect(service.deactivateUser('missing')).rejects.toBeInstanceOf(UserNotFoundError);
+  });
+
+  it('backfills admin on an orphaned repo (no roles at all) to the bootstrap admin', async () => {
+    const { service } = await createService();
+    await service.createUser({
+      username: 'hemiblade',
+      password: 's3cret-pass',
+      createdBy: 'setup',
+    });
+
+    const assignment = await service.backfillOrphanedRepoAdmin('analytics', 'hemiblade');
+
+    expect(assignment).toMatchObject({ username: 'hemiblade', repoId: 'analytics', role: 'admin' });
+    expect(await service.getRepoRole('hemiblade', 'analytics')).toBe('admin');
+  });
+
+  it('does nothing (returns null) for a repo that already has at least one role assigned', async () => {
+    const { service } = await createService();
+    await service.createUser({
+      username: 'hemiblade',
+      password: 's3cret-pass',
+      createdBy: 'setup',
+    });
+    await service.createUser({ username: 'alice', password: 's3cret-pass', createdBy: 'setup' });
+    await service.grantRepoRole({
+      username: 'alice',
+      repoId: 'analytics',
+      role: 'admin',
+      grantedBy: 'repo-bootstrap',
+    });
+
+    const assignment = await service.backfillOrphanedRepoAdmin('analytics', 'hemiblade');
+
+    expect(assignment).toBeNull();
+    expect(await service.getRepoRole('hemiblade', 'analytics')).toBeNull();
+    expect(await service.getRepoRole('alice', 'analytics')).toBe('admin');
   });
 });

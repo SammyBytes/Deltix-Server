@@ -254,6 +254,41 @@ export class AuthService {
     return this.grantRepoRole({ username, repoId, role: 'admin', grantedBy: 'repo-bootstrap' });
   }
 
+  /**
+   * Break-glass recovery for repos left with zero role assignments (e.g. a
+   * repo provisioned before per-repo authorization existed, or one whose
+   * auto-admin-on-creation grant never landed). Fail-closed access control
+   * (ADR: Fase 5.6) means such a repo is otherwise permanently
+   * inaccessible to everyone, including the system's own bootstrap admin --
+   * there is no self-service way to grant a role without already holding
+   * one. This only acts when the repo has NO roles at all; a repo with any
+   * existing assignment (even to a different user) is left untouched, so
+   * this can never be used to silently override an already-governed repo.
+   */
+  async backfillOrphanedRepoAdmin(
+    repoId: string,
+    bootstrapAdminUsername: string,
+  ): Promise<RepoRoleAssignment | null> {
+    const existingRoles = await this.listRepoRoles(repoId);
+    if (existingRoles.length > 0) {
+      return null;
+    }
+    const bootstrapAdmin = await this.userStore.getByUsername(bootstrapAdminUsername);
+    if (!bootstrapAdmin) {
+      // The configured bootstrap admin username doesn't actually exist as a
+      // user (e.g. a different admin was already provisioned before this
+      // env var was set) -- skip rather than crash the whole boot sequence
+      // over a single orphaned repo.
+      return null;
+    }
+    return this.grantRepoRole({
+      username: bootstrapAdminUsername,
+      repoId,
+      role: 'admin',
+      grantedBy: 'orphaned-repo-backfill',
+    });
+  }
+
   async legacyUsers() {
     return this.userStore.legacyUsers();
   }
