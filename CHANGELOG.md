@@ -9,6 +9,43 @@ Each entry starts with a **plain-language summary** (what changed, in
 everyday words) before any technical detail — written so someone outside
 engineering can understand what shipped and why it matters.
 
+## [0.4.0] - 2026-08-27
+
+**In plain terms:** two fixes bundled with one new feature. First, the Admin
+Web UI's login page and JavaScript were never told "don't cache me" — so
+after every server upgrade, browsers kept quietly running the *old*
+JavaScript from before the fix, even though the server itself was correctly
+updated and restarted. That's exactly why the previous release "didn't seem
+to do anything": the browser was still executing yesterday's code. Second,
+for VMs that don't sit behind a reverse proxy, the server can now terminate
+HTTPS directly — a new `deltix-server` script generates a self-signed
+certificate for your machine's hostname or IP, and once it's configured the
+Admin Web UI and REST API serve over HTTPS with no extra infrastructure.
+
+### Fixed
+
+- **Admin Web UI assets (login page, `app.js`, vendor CSS/JS) were served
+  with no cache instructions**, so browsers could keep an old, stale copy
+  indefinitely across server upgrades. Every admin-facing response now sets
+  `Cache-Control: no-store` so the browser always fetches the current
+  version after a restart. **If you're upgrading from an older version and
+  still see stale behavior after restarting the server, do one hard refresh
+  (Ctrl+Shift+R) in your browser to clear the previously cached copy —
+  future upgrades will no longer require this.**
+
+### Added
+
+- **Direct HTTPS termination for the HTTP control plane.** New optional env
+  vars `DELTIX_HTTP_TLS_CERT_PATH` / `DELTIX_HTTP_TLS_KEY_PATH` (must be set
+  together); when present, the server serves the Admin Web UI and REST API
+  over HTTPS directly and marks session cookies `Secure` unconditionally.
+  Existing reverse-proxy TLS setups (`x-forwarded-proto`) are unaffected.
+- New `bun run tls:server-cert <hostname-or-ip>` script
+  (`scripts/generate-server-tls-cert.ts`) that generates a self-signed
+  EC P-256 certificate for a given hostname/IP and prints the exact env
+  vars to configure. See the README's "HTTPS for the HTTP control plane"
+  section for the full walkthrough.
+
 ## [0.3.2] - 2026-08-27
 
 **In plain terms:** three real production bugs, all traced to the same root

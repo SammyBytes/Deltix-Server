@@ -105,6 +105,31 @@ docker pull ghcr.io/sammybytes/deltix-server:latest
 The image exposes port `9090` (HTTP control plane) and `50051` (gRPC transfer engine, mTLS),
 and declares `/app/data` + your mounted Dolt repo path as the persistent state to back up.
 
+### HTTPS for the HTTP control plane (Admin Web UI + REST API)
+
+By default the HTTP control plane (port `9090`) serves plain HTTP, which is fine when a
+reverse proxy in front of it terminates TLS. If you're deploying directly onto a bare
+VM/IP with no reverse proxy (the common case for an internal/air-gapped pilot), generate a
+self-signed certificate and point the server at it:
+
+```bash
+bun run tls:server-cert 10.1.10.129   # replace with your server's hostname or IP
+```
+
+This writes `./certs/server/server.crt` + `server.key` and prints the two env vars to add:
+
+```
+DELTIX_HTTP_TLS_CERT_PATH=/path/to/certs/server/server.crt
+DELTIX_HTTP_TLS_KEY_PATH=/path/to/certs/server/server.key
+```
+
+Once both are set, the server automatically serves the Admin Web UI and REST API over HTTPS
+and marks session cookies `Secure`. Without either of these set, the server stays on plain
+HTTP and cookies are only marked `Secure` when a reverse proxy in front of it sets
+`x-forwarded-proto: https`. Browsers/CLI will warn about an untrusted issuer for a
+self-signed cert on first connection — expected, and safe to accept, since the connection
+itself is still fully encrypted; it's only not signed by a public CA.
+
 ## Security
 
 See [`SECURITY.md`](./SECURITY.md) for the supported version policy, vulnerability reporting

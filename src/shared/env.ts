@@ -92,6 +92,14 @@ const envSchema = z
     DELTIX_REPO_DB_PATH: z.string().default('./data/repos.db'),
     DELTIX_DOLT_REPOS_ROOT_PATH: z.string().default('./data/dolt-repos'),
     NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
+    // Optional TLS for the HTTP control plane itself (Admin Web UI + REST
+    // API). Both must be set together to enable it; when unset the server
+    // falls back to plain HTTP (unchanged default, still correct for
+    // deployments that terminate TLS at a reverse proxy in front of this
+    // process). See scripts/generate-server-tls-cert.ts to generate a
+    // self-signed certificate for a direct, no-reverse-proxy deployment.
+    DELTIX_HTTP_TLS_CERT_PATH: z.string().min(1).optional(),
+    DELTIX_HTTP_TLS_KEY_PATH: z.string().min(1).optional(),
   })
   .superRefine((env, ctx) => {
     const hasBootstrapUsername = typeof env.DELTIX_BOOTSTRAP_ADMIN_USERNAME === 'string';
@@ -101,6 +109,14 @@ const envSchema = z
         code: 'custom',
         message:
           'DELTIX_BOOTSTRAP_ADMIN_USERNAME and DELTIX_BOOTSTRAP_ADMIN_PASSWORD must be set together',
+      });
+    }
+    const hasHttpTlsCert = typeof env.DELTIX_HTTP_TLS_CERT_PATH === 'string';
+    const hasHttpTlsKey = typeof env.DELTIX_HTTP_TLS_KEY_PATH === 'string';
+    if (hasHttpTlsCert !== hasHttpTlsKey) {
+      ctx.addIssue({
+        code: 'custom',
+        message: 'DELTIX_HTTP_TLS_CERT_PATH and DELTIX_HTTP_TLS_KEY_PATH must be set together',
       });
     }
   });

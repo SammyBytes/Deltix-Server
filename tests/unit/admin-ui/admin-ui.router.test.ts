@@ -85,4 +85,20 @@ describe('admin-ui/admin-ui.router (unit, real Hono.fetch)', () => {
     const body = await res.text();
     expect(body).toContain("fetch('/api/v1/auth/login'");
   });
+
+  it.each(['/', '/setup', '/app.js'])(
+    'sets no-store Cache-Control on %s so upgrades are never served stale from the browser cache',
+    async (path) => {
+      const app = createAdminUiRouter({
+        async getSetupStatus() {
+          return { eligible: true, reason: 'not_configured' as const };
+        },
+      } as never);
+
+      const res = await app.request(path);
+
+      expect(res.headers.get('cache-control')).toContain('no-store');
+      expect(res.headers.get('pragma')).toBe('no-cache');
+    },
+  );
 });

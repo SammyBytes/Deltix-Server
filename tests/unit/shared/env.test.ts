@@ -70,4 +70,34 @@ describe('shared/env', () => {
 
     expect(env.DELTIX_ADMIN_UI_ENABLED).toBe(true);
   });
+
+  it('accepts DELTIX_HTTP_TLS_CERT_PATH/KEY_PATH set together', () => {
+    const env = loadEnv({
+      ...VALID_ENV,
+      DELTIX_HTTP_TLS_CERT_PATH: '/tmp/http-cert.pem',
+      DELTIX_HTTP_TLS_KEY_PATH: '/tmp/http-key.pem',
+    });
+
+    expect(env.DELTIX_HTTP_TLS_CERT_PATH).toBe('/tmp/http-cert.pem');
+    expect(env.DELTIX_HTTP_TLS_KEY_PATH).toBe('/tmp/http-key.pem');
+  });
+
+  it('leaves DELTIX_HTTP_TLS_CERT_PATH/KEY_PATH undefined when neither is set (plain HTTP default)', () => {
+    const env = loadEnv(VALID_ENV);
+
+    expect(env.DELTIX_HTTP_TLS_CERT_PATH).toBeUndefined();
+    expect(env.DELTIX_HTTP_TLS_KEY_PATH).toBeUndefined();
+  });
+
+  it('rejects DELTIX_HTTP_TLS_CERT_PATH set without DELTIX_HTTP_TLS_KEY_PATH', () => {
+    expect(() =>
+      loadEnv({ ...VALID_ENV, DELTIX_HTTP_TLS_CERT_PATH: '/tmp/http-cert.pem' }),
+    ).toThrow();
+  });
+
+  it('rejects DELTIX_HTTP_TLS_KEY_PATH set without DELTIX_HTTP_TLS_CERT_PATH', () => {
+    expect(() =>
+      loadEnv({ ...VALID_ENV, DELTIX_HTTP_TLS_KEY_PATH: '/tmp/http-key.pem' }),
+    ).toThrow();
+  });
 });

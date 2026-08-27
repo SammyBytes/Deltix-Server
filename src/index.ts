@@ -108,7 +108,14 @@ async function main(): Promise<void> {
     );
   }
 
-  const secureCookies = env.NODE_ENV === 'production';
+  const httpTlsEnabled = Boolean(env.DELTIX_HTTP_TLS_CERT_PATH && env.DELTIX_HTTP_TLS_KEY_PATH);
+  // Cookies are marked Secure whenever this process itself terminates TLS
+  // (httpTlsEnabled) -- a reverse-proxy-terminated deployment is separately
+  // covered per-request via the x-forwarded-proto check in auth.router.ts.
+  // NODE_ENV is intentionally NOT used here: it says nothing about whether
+  // the connection is actually encrypted, and blindly trusting it caused a
+  // real production bug (session cookie silently dropped on plain HTTP).
+  const secureCookies = httpTlsEnabled;
   const authRouter = createAuthRouter(authService, secureCookies);
   const transferRouter = createTransferRouter(authService, ticketService);
   const storageRouter = createStorageRouter(authService, nasSyncService);
@@ -137,8 +144,19 @@ async function main(): Promise<void> {
   }
 
   const httpPort = Number(Bun.env.HTTP_PORT ?? 9090);
-  Bun.serve({ port: httpPort, fetch: app.fetch });
-  logger.info({ port: httpPort }, 'HTTP control plane listening');
+  Bun.serve({
+    port: httpPort,
+    fetch: app.fetch,
+    ...(httpTlsEnabled
+      ? {
+          tls: {
+            cert: Bun.file(env.DELTIX_HTTP_TLS_CERT_PATH as string),
+            key: Bun.file(env.DELTIX_HTTP_TLS_KEY_PATH as string),
+          },
+        }
+      : {}),
+  });
+  logger.info({ port: httpPort, tls: httpTlsEnabled }, 'HTTP control plane listening');
 
   const nasSyncWorker = new NasSyncWorker(
     nasSyncService,

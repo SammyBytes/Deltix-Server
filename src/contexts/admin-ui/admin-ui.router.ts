@@ -40,17 +40,32 @@ const CONTENT_SECURITY_POLICY = [
   "frame-ancestors 'none'",
 ].join('; ');
 
+/**
+ * The Admin Web UI ships as static HTML/JS/CSS served directly by this
+ * router (no build hash / cache-busting filenames), so without an explicit
+ * Cache-Control the browser is free to keep serving a stale `app.js` (or
+ * `login.html`) from its disk cache indefinitely after a server upgrade --
+ * silently running old client code against a new server, which produces
+ * exactly the "I upgraded but nothing changed" symptom. Always revalidate.
+ */
+function setNoCacheHeaders(c: { header: (name: string, value: string) => void }): void {
+  c.header('cache-control', 'no-store, no-cache, must-revalidate');
+  c.header('pragma', 'no-cache');
+}
+
 export function createAdminUiRouter(authService: AuthService): Hono {
   const app = new Hono();
 
   app.get('/', async (c) => {
     c.header('content-security-policy', CONTENT_SECURITY_POLICY);
+    setNoCacheHeaders(c);
     const setup = await authService.getSetupStatus();
     return c.html(setup.eligible ? setupPageHtml : loginPageHtml);
   });
 
   app.get('/setup', async (c) => {
     c.header('content-security-policy', CONTENT_SECURITY_POLICY);
+    setNoCacheHeaders(c);
     const setup = await authService.getSetupStatus();
     if (!setup.eligible) {
       return c.html(loginPageHtml, 404);
@@ -60,16 +75,19 @@ export function createAdminUiRouter(authService: AuthService): Hono {
 
   app.get('/users', async (c) => {
     c.header('content-security-policy', CONTENT_SECURITY_POLICY);
+    setNoCacheHeaders(c);
     return c.html(loginPageHtml);
   });
 
   app.get('/app.js', (c) => {
     c.header('content-security-policy', CONTENT_SECURITY_POLICY);
+    setNoCacheHeaders(c);
     return c.text(appScriptJs, 200, { 'content-type': 'application/javascript; charset=utf-8' });
   });
 
   app.get('/vendor/:file', (c) => {
     c.header('content-security-policy', CONTENT_SECURITY_POLICY);
+    setNoCacheHeaders(c);
     const asset = vendorAssets.get(c.req.param('file'));
     if (!asset) {
       return c.notFound();
