@@ -110,17 +110,39 @@ and declares `/app/data` + your mounted Dolt repo path as the persistent state t
 By default the HTTP control plane (port `9090`) serves plain HTTP, which is fine when a
 reverse proxy in front of it terminates TLS. If you're deploying directly onto a bare
 VM/IP with no reverse proxy (the common case for an internal/air-gapped pilot), generate a
-self-signed certificate and point the server at it:
+self-signed certificate and point the server at it. Pick whichever of these three matches
+how you deploy — no need to have the source repo checked out on the target machine:
+
+**Option A — standalone binary (recommended for a bare VM with no repo/Bun toolchain
+installed):** download `deltix-gen-cert-linux-x64` (or `-arm64`) from the
+[latest release](https://github.com/SammyBytes/Deltix-Server/releases/latest), then:
+
+```bash
+chmod +x deltix-gen-cert-linux-x64
+./deltix-gen-cert-linux-x64 10.1.10.129   # replace with your server's hostname or IP
+```
+
+**Option B — Docker (if you're already running the server via the published image):**
+
+```bash
+mkdir -p ./certs && chmod 777 ./certs
+docker run --rm --entrypoint bun -v "$(pwd)/certs:/app/certs" \
+  ghcr.io/sammybytes/deltix-server:latest \
+  run scripts/generate-server-tls-cert.ts 10.1.10.129 /app/certs
+```
+
+**Option C — from a repo checkout (if you already have the source and `bun install`'d):**
 
 ```bash
 bun run tls:server-cert 10.1.10.129   # replace with your server's hostname or IP
 ```
 
-This writes `./certs/server/server.crt` + `server.key` and prints the two env vars to add:
+All three write `server.crt` + `server.key` to the given output directory and print the two
+env vars to add:
 
 ```
-DELTIX_HTTP_TLS_CERT_PATH=/path/to/certs/server/server.crt
-DELTIX_HTTP_TLS_KEY_PATH=/path/to/certs/server/server.key
+DELTIX_HTTP_TLS_CERT_PATH=/path/to/certs/server.crt
+DELTIX_HTTP_TLS_KEY_PATH=/path/to/certs/server.key
 ```
 
 Once both are set, the server automatically serves the Admin Web UI and REST API over HTTPS

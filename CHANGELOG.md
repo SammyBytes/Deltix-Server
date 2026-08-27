@@ -9,6 +9,25 @@ Each entry starts with a **plain-language summary** (what changed, in
 everyday words) before any technical detail — written so someone outside
 engineering can understand what shipped and why it matters.
 
+## [0.4.1] - 2026-08-27
+
+**In plain terms:** you no longer need the server's source code to generate
+a production TLS certificate. Previously this required cloning the repo
+and running `bun install` first — now a single downloadable file does the
+job, or a one-line Docker command if you're already running the server
+that way.
+
+### Added
+
+- **Standalone `deltix-gen-cert` binaries** attached to every GitHub
+  Release (`deltix-gen-cert-linux-x64` / `-arm64`) — download, `chmod +x`,
+  and run directly on the target machine to generate a self-signed
+  certificate, no repo or Bun install required.
+- **Docker one-liner** documented in the README for generating a cert using
+  the already-published server image, for deployments that only use Docker.
+- The existing `bun run tls:server-cert` (repo-checkout) path is unchanged
+  and still documented as an alternative.
+
 ## [0.4.0] - 2026-08-27
 
 **In plain terms:** two fixes bundled with one new feature. First, the Admin

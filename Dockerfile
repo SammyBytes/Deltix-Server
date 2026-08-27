@@ -37,6 +37,7 @@ COPY --chown=deltix:deltix package.json bun.lock ./
 COPY --chown=deltix:deltix packages ./packages
 COPY --chown=deltix:deltix src ./src
 COPY --chown=deltix:deltix proto ./proto
+COPY --chown=deltix:deltix scripts ./scripts
 
 USER deltix
 

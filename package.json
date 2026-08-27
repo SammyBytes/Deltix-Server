@@ -1,6 +1,6 @@
 {
   "name": "deltix-server",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "private": true,
   "license": "BUSL-1.1",
   "type": "module",
@@ -17,7 +17,8 @@
     "test:unit": "bun test tests/unit",
     "test:integration": "bun test tests/integration",
     "test:smoke": "bun test tests/smoke",
-    "tls:server-cert": "bun run scripts/generate-server-tls-cert.ts"
+    "tls:server-cert": "bun run scripts/generate-server-tls-cert.ts",
+    "build:tls-cert-tool": "bun build ./scripts/generate-server-tls-cert.ts --compile --outfile dist/deltix-gen-cert"
   },
   "dependencies": {
     "@deltix/addon-sdk": "workspace:*",
