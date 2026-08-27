@@ -1,0 +1,52 @@
+name: CD (build & publish image)
+
+# Deploys are manual/opt-in for a piloto, not on every push to main:
+# - a git tag `v*` publishes a versioned + `latest` image.
+# - `workflow_dispatch` lets an operator rebuild the current main on demand
+#   (e.g. to pick up a base-image security patch) without cutting a tag.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  test:
+    # Never publish an image that hasn't passed the same test suite CI
+    # enforces on every push — this job re-runs it as a hard gate.
+    uses: ./.github/workflows/ci.yml
+
+  build-and-push:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/metadata-action@v5
+        id: meta
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/deltix-server
+          tags: |
+            type=semver,pattern={{version}}
+            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+            type=sha
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

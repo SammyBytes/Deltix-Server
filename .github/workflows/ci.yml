@@ -5,6 +5,7 @@ on:
     branches: ['**']
   pull_request:
     branches: ['**']
+  workflow_call: {} # allows cd.yml to reuse this suite as a publish gate
 
 jobs:
   test:
