@@ -1,6 +1,7 @@
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { type Client, createClient } from '@libsql/client';
+import type { RepoRole, RepoRoleAssignment } from './types';
 import type { LegacyUserRecord, UserRecord, UserStore } from './user-store';
 
 function rowToUser(row: Record<string, unknown>): UserRecord {
@@ -14,6 +15,16 @@ function rowToUser(row: Record<string, unknown>): UserRecord {
       row.last_login_at === null || row.last_login_at === undefined
         ? null
         : Number(row.last_login_at),
+  };
+}
+
+function rowToRepoRoleAssignment(row: Record<string, unknown>): RepoRoleAssignment {
+  return {
+    username: row.username as string,
+    repoId: row.repo_id as string,
+    role: row.role as RepoRole,
+    grantedAt: Number(row.granted_at),
+    grantedBy: row.granted_by as string,
   };
 }
 
@@ -37,6 +48,17 @@ export class LibsqlUserStore implements UserStore {
         created_by TEXT NOT NULL,
         active INTEGER NOT NULL,
         last_login_at INTEGER
+      )
+    `);
+    await this.client.execute(`
+      CREATE TABLE IF NOT EXISTS repo_roles (
+        username TEXT NOT NULL,
+        repo_id TEXT NOT NULL,
+        role TEXT NOT NULL,
+        granted_at INTEGER NOT NULL,
+        granted_by TEXT NOT NULL,
+        PRIMARY KEY (username, repo_id),
+        FOREIGN KEY (username) REFERENCES users(username) ON DELETE CASCADE
       )
     `);
   }
@@ -123,5 +145,51 @@ export class LibsqlUserStore implements UserStore {
 
   async legacyUsers(): Promise<LegacyUserRecord[]> {
     return this.legacySeedUsers;
+  }
+
+  async getRepoRole(username: string, repoId: string): Promise<RepoRole | null> {
+    const result = await this.client.execute({
+      sql: 'SELECT role FROM repo_roles WHERE username = ? AND repo_id = ?',
+      args: [username, repoId],
+    });
+    const row = result.rows[0];
+    return row ? (row.role as RepoRole) : null;
+  }
+
+  async listRepoRoles(repoId: string): Promise<RepoRoleAssignment[]> {
+    const result = await this.client.execute({
+      sql: `SELECT username, repo_id, role, granted_at, granted_by
+            FROM repo_roles
+            WHERE repo_id = ?
+            ORDER BY username ASC`,
+      args: [repoId],
+    });
+    return result.rows.map((row) => rowToRepoRoleAssignment(row as Record<string, unknown>));
+  }
+
+  async upsertRepoRole(assignment: RepoRoleAssignment): Promise<void> {
+    await this.client.execute({
+      sql: `INSERT INTO repo_roles (username, repo_id, role, granted_at, granted_by)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(username, repo_id) DO UPDATE SET
+              role = excluded.role,
+              granted_at = excluded.granted_at,
+              granted_by = excluded.granted_by`,
+      args: [
+        assignment.username,
+        assignment.repoId,
+        assignment.role,
+        assignment.grantedAt,
+        assignment.grantedBy,
+      ],
+    });
+  }
+
+  async deleteRepoRole(username: string, repoId: string): Promise<boolean> {
+    const result = await this.client.execute({
+      sql: 'DELETE FROM repo_roles WHERE username = ? AND repo_id = ?',
+      args: [username, repoId],
+    });
+    return result.rowsAffected === 1;
   }
 }

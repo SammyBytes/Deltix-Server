@@ -1,4 +1,6 @@
 import {
+  InvalidRepoRoleError,
+  RepoRoleAssignmentNotFoundError,
   SetupAlreadyConfiguredError,
   UserAlreadyExistsError,
   UserHasActiveSessionsError,
@@ -14,10 +16,14 @@ import type {
   AccessTokenClaims,
   CreateUserInput,
   LoginResult,
+  RepoRole,
+  RepoRoleAssignment,
   SetupStatus,
   UserSummary,
 } from './types';
 import type { UserRecord, UserStore } from './user-store';
+
+const REPO_ROLES: RepoRole[] = ['reader', 'writer', 'admin'];
 
 export interface AuthServiceConfig {
   jwtPrivateKeyPem: string;
@@ -210,8 +216,64 @@ export class AuthService {
     }
   }
 
+  async getRepoRole(username: string, repoId: string): Promise<RepoRole | null> {
+    return this.userStore.getRepoRole(username, repoId);
+  }
+
+  async listRepoRoles(repoId: string): Promise<RepoRoleAssignment[]> {
+    return this.userStore.listRepoRoles(repoId);
+  }
+
+  async grantRepoRole(params: {
+    username: string;
+    repoId: string;
+    role: RepoRole;
+    grantedBy: string;
+  }): Promise<RepoRoleAssignment> {
+    await this.assertUserExists(params.username);
+    this.assertValidRepoRole(params.role);
+    const assignment: RepoRoleAssignment = {
+      username: params.username,
+      repoId: params.repoId,
+      role: params.role,
+      grantedAt: this.now(),
+      grantedBy: params.grantedBy,
+    };
+    await this.userStore.upsertRepoRole(assignment);
+    return assignment;
+  }
+
+  async revokeRepoRole(username: string, repoId: string): Promise<void> {
+    const deleted = await this.userStore.deleteRepoRole(username, repoId);
+    if (!deleted) {
+      throw new RepoRoleAssignmentNotFoundError(username, repoId);
+    }
+  }
+
+  async grantRepoAdminToCreator(repoId: string, username: string): Promise<RepoRoleAssignment> {
+    return this.grantRepoRole({ username, repoId, role: 'admin', grantedBy: 'repo-bootstrap' });
+  }
+
   async legacyUsers() {
     return this.userStore.legacyUsers();
+  }
+
+  private assertValidRepoRole(role: string): asserts role is RepoRole {
+    if (!REPO_ROLES.includes(role as RepoRole)) {
+      throw new InvalidRepoRoleError(role);
+    }
+  }
+
+  private async assertUserExists(username: string): Promise<void> {
+    const user = await this.userStore.getByUsername(username);
+    if (user) {
+      return;
+    }
+    const legacyUsers = await this.userStore.legacyUsers();
+    if (legacyUsers.some((candidate) => candidate.username === username)) {
+      return;
+    }
+    throw new UserNotFoundError(username);
   }
 
   private async findUserForLogin(username: string): Promise<UserRecord> {

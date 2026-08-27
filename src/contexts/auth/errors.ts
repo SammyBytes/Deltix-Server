@@ -65,3 +65,17 @@ export class SetupAlreadyConfiguredError extends Error {
     this.name = 'SetupAlreadyConfiguredError';
   }
 }
+
+export class InvalidRepoRoleError extends Error {
+  constructor(role: string) {
+    super(`Invalid repo role "${role}": expected reader, writer, or admin`);
+    this.name = 'InvalidRepoRoleError';
+  }
+}
+
+export class RepoRoleAssignmentNotFoundError extends Error {
+  constructor(username: string, repoId: string) {
+    super(`Repo role assignment not found for user ${username} on repo ${repoId}`);
+    this.name = 'RepoRoleAssignmentNotFoundError';
+  }
+}

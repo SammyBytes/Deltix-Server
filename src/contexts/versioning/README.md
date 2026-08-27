@@ -89,44 +89,6 @@ Protected-branch rules enforced by the service:
 - current checked-out branch cannot be deleted
 - `main` cannot be deleted
 
-## Fase 5.5 — log y diff
-
-`LogService` and `DiffService` expose read-only Dolt history queries for provisioned repos without taking the branch mutex, because `dolt_log` / `dolt_diff*` are pure read operations over system tables and do not mutate the shared working directory.
-
-- `runDoltReadLog()` queries `dolt_log` (optionally `AS OF '<branch>'`) and returns structured commits with `commitHash`, `author`, `authorEmail`, `timestamp`, `message`, and parsed `parents`.
-- `runDoltReadDiff()` queries `dolt_diff_summary(from,to)` to discover changed tables, then `dolt_diff(from,to,table)` per table to translate row-level changes into `{ diffType, oldValues, newValues }`.
-- Branch names and commit refs are validated with the same allow-list discipline already used for branching/merge before any ref is interpolated into a `dolt sql -q` string.
-
-REST API surface:
-
-- `GET /api/v1/versioning/repos/:repoId/log?branch=<name>&limit=<n>`
-- `GET /api/v1/versioning/repos/:repoId/diff?from=<ref>&to=<ref>`
-
-## Fase 5.8 — sync preferences
-
-`LibsqlRepoStore` now persists per-repo sync preferences in the same libSQL
-DB as the `repoId <-> doltPath` mapping. `SyncPreferenceService` is the
-server-side source of truth for:
-
-- `schema_only` vs `schema_and_data` mode
-- requested table subsets per repo
-- dry-run previews of FK-closure expansion
-- fail-closed rejection when a requested subset excludes FK-required tables
-
-Foreign-key closure is always recomputed server-side from Dolt via
-`dolt sql` against `information_schema.KEY_COLUMN_USAGE`; the client may
-propose overrides on the transfer-ticket request, but the server never
-trusts precomputed client closure data. The REST API is:
-
-- `GET /api/v1/versioning/repos/:repoId/sync-preferences`
-- `PUT /api/v1/versioning/repos/:repoId/sync-preferences`
-- `POST /api/v1/versioning/repos/:repoId/sync-preferences/dry-run`
-
-During gRPC Push, `storage` invokes an injected `onBeforePush` hook (wired
-from `src/index.ts`) so `versioning` can revalidate any ticket override
-before a transfer job is committed, without breaking the cross-context ACL
-boundary.
-
 ## Fase 5.4 — merge y conflictos
 
 `MergeService` exposes real `dolt merge` operations on provisioned repos,
@@ -163,6 +125,61 @@ Merge operations share the exact same per-repo in-memory mutex as branching
 via `repo-branch-mutex.ts`, so checkout/create/delete/merge cannot
 interleave on the same real Dolt working directory.
 
-## Not yet implemented
+## Fase 5.5 — log y diff
 
-- per-repo/branch authorization — see the ADR for the remaining Fase 5 sub-phases.
+`LogService` and `DiffService` expose read-only Dolt history queries for provisioned repos without taking the branch mutex, because `dolt_log` / `dolt_diff*` are pure read operations over system tables and do not mutate the shared working directory.
+
+- `runDoltReadLog()` queries `dolt_log` (optionally `AS OF '<branch>'`) and returns structured commits with `commitHash`, `author`, `authorEmail`, `timestamp`, `message`, and parsed `parents`.
+- `runDoltReadDiff()` queries `dolt_diff_summary(from,to)` to discover changed tables, then `dolt_diff(from,to,table)` per table to translate row-level changes into `{ diffType, oldValues, newValues }`.
+- Branch names and commit refs are validated with the same allow-list discipline already used for branching/merge before any ref is interpolated into a `dolt sql -q` string.
+
+REST API surface:
+
+- `GET /api/v1/versioning/repos/:repoId/log?branch=<name>&limit=<n>`
+- `GET /api/v1/versioning/repos/:repoId/diff?from=<ref>&to=<ref>`
+
+## Fase 5.6 — autorización por repo
+
+Authorization is intentionally simple and repo-scoped for this MVP:
+
+- `reader`: can list repos they can see, inspect repo metadata, branches, current branch, log, diff, and list repo role assignments.
+- `writer`: inherits reader and can create branches, checkout branches, and merge.
+- `admin`: inherits writer and can delete branches, manage sync preferences, and grant/revoke repo roles.
+
+Design decisions:
+
+- Role assignments live in the `auth` context's existing user DB (`repo_roles` table), not in `versioning`, so `versioning` consumes authorization strictly through the `auth` public barrel.
+- Repo creation auto-grants the creator `admin` to solve the bootstrap problem while keeping all subsequent access fail-closed.
+- No per-branch ACLs yet despite the ADR shorthand saying `repo/branch`; the implemented scope is per-repo only because the ADR explicitly says no granular RBAC yet.
+- Users with no assignment on a repo get `403` on every versioning endpoint except repo creation.
+
+REST API surface added in this sub-phase:
+
+- `GET /api/v1/versioning/repos/:repoId/roles`
+- `POST /api/v1/versioning/repos/:repoId/roles` with `{ username, role }`
+- `DELETE /api/v1/versioning/repos/:repoId/roles/:username`
+
+## Fase 5.8 — sync preferences
+
+`LibsqlRepoStore` now persists per-repo sync preferences in the same libSQL
+DB as the `repoId <-> doltPath` mapping. `SyncPreferenceService` is the
+server-side source of truth for:
+
+- `schema_only` vs `schema_and_data` mode
+- requested table subsets per repo
+- dry-run previews of FK-closure expansion
+- fail-closed rejection when a requested subset excludes FK-required tables
+
+Foreign-key closure is always recomputed server-side from Dolt via
+`dolt sql` against `information_schema.KEY_COLUMN_USAGE`; the client may
+propose overrides on the transfer-ticket request, but the server never
+trusts precomputed client closure data. The REST API is:
+
+- `GET /api/v1/versioning/repos/:repoId/sync-preferences`
+- `PUT /api/v1/versioning/repos/:repoId/sync-preferences`
+- `POST /api/v1/versioning/repos/:repoId/sync-preferences/dry-run`
+
+During gRPC Push, `storage` invokes an injected `onBeforePush` hook (wired
+from `src/index.ts`) so `versioning` can revalidate any ticket override
+before a transfer job is committed, without breaking the cross-context ACL
+boundary.

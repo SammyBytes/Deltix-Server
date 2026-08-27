@@ -47,6 +47,14 @@ describe('versioning/versioning.router (integration, real HTTP requests via Hono
       active: true,
       lastLoginAt: null,
     });
+    await userStore.create({
+      username: 'bob',
+      passwordHash: await hashPassword('another-pass'),
+      createdAt: Date.now(),
+      createdBy: 'seed',
+      active: true,
+      lastLoginAt: null,
+    });
     const { privateKeyPem, publicKeyPem } = generateTestEd25519KeyPairPem();
 
     authService = new AuthService(
@@ -69,7 +77,7 @@ describe('versioning/versioning.router (integration, real HTTP requests via Hono
     const provisioningService = new RepoProvisioningService(
       repoStore,
       runDoltInit,
-      '/tmp/dolt-repos',
+      './.test-dolt-repos',
     );
     const syncPreferenceService = new SyncPreferenceService(repoStore, async () => [
       {
@@ -171,9 +179,36 @@ describe('versioning/versioning.router (integration, real HTTP requests via Hono
     await rm(tempDir, { recursive: true, force: true });
   });
 
-  async function loginAndGetAccessToken(): Promise<string> {
-    const { accessToken } = await authService.login('alice', 's3cret-pass');
+  async function loginAndGetAccessToken(
+    username = 'alice',
+    password = 's3cret-pass',
+  ): Promise<string> {
+    const { accessToken } = await authService.login(username, password);
     return accessToken;
+  }
+
+  async function provisionRepoAsAlice(repoId = 'demo-repo'): Promise<Response> {
+    const token = await loginAndGetAccessToken();
+    const res = await app.request('/repos', {
+      method: 'POST',
+      headers: { authorization: ['Bearer ', token].join(''), 'content-type': 'application/json' },
+      body: JSON.stringify({ repoId }),
+    });
+    expect(res.status).toBe(201);
+    return res;
+  }
+
+  async function grantRole(
+    repoId: string,
+    username: string,
+    role: 'reader' | 'writer' | 'admin',
+  ): Promise<Response> {
+    const token = await loginAndGetAccessToken();
+    return app.request(`/repos/${repoId}/roles`, {
+      method: 'POST',
+      headers: { authorization: ['Bearer ', token].join(''), 'content-type': 'application/json' },
+      body: JSON.stringify({ username, role }),
+    });
   }
 
   describe('POST /repos', () => {
@@ -187,13 +222,7 @@ describe('versioning/versioning.router (integration, real HTTP requests via Hono
     });
 
     it('provisions a repo for an authenticated user', async () => {
-      const token = await loginAndGetAccessToken();
-
-      const res = await app.request('/repos', {
-        method: 'POST',
-        headers: { authorization: ['Bearer ', token].join(''), 'content-type': 'application/json' },
-        body: JSON.stringify({ repoId: 'demo-repo' }),
-      });
+      const res = await provisionRepoAsAlice('demo-repo');
 
       expect(res.status).toBe(201);
       const body = (await res.json()) as { repo: { repoId: string; createdBy: string } };
@@ -215,11 +244,7 @@ describe('versioning/versioning.router (integration, real HTTP requests via Hono
 
     it('returns 409 when the repoId is already provisioned', async () => {
       const token = await loginAndGetAccessToken();
-      await app.request('/repos', {
-        method: 'POST',
-        headers: { authorization: ['Bearer ', token].join(''), 'content-type': 'application/json' },
-        body: JSON.stringify({ repoId: 'demo-repo' }),
-      });
+      await provisionRepoAsAlice('demo-repo');
 
       const res = await app.request('/repos', {
         method: 'POST',
@@ -239,59 +264,50 @@ describe('versioning/versioning.router (integration, real HTTP requests via Hono
 
     it('lists provisioned repos for an authenticated user', async () => {
       const token = await loginAndGetAccessToken();
-      await app.request('/repos', {
-        method: 'POST',
-        headers: { authorization: ['Bearer ', token].join(''), 'content-type': 'application/json' },
-        body: JSON.stringify({ repoId: 'demo-repo' }),
-      });
+      await provisionRepoAsAlice('demo-repo');
 
       const res = await app.request('/repos', {
         headers: { authorization: ['Bearer ', token].join('') },
       });
 
       expect(res.status).toBe(200);
-      const body = (await res.json()) as { repos: Array<{ repoId: string }> };
+      const body = (await res.json()) as { repos: Array<{ repoId: string; role: string }> };
       expect(body.repos).toHaveLength(1);
+      expect(body.repos[0]?.role).toBe('admin');
     });
   });
 
   describe('GET /repos/:repoId', () => {
     it('returns 404 for a repo that does not exist', async () => {
+      await provisionRepoAsAlice('different-repo');
       const token = await loginAndGetAccessToken();
 
       const res = await app.request('/repos/does-not-exist', {
         headers: { authorization: ['Bearer ', token].join('') },
       });
 
-      expect(res.status).toBe(404);
+      expect(res.status).toBe(403);
     });
 
     it('returns the repo record when it exists', async () => {
       const token = await loginAndGetAccessToken();
-      await app.request('/repos', {
-        method: 'POST',
-        headers: { authorization: ['Bearer ', token].join(''), 'content-type': 'application/json' },
-        body: JSON.stringify({ repoId: 'demo-repo' }),
-      });
+      await provisionRepoAsAlice('demo-repo');
 
       const res = await app.request('/repos/demo-repo', {
         headers: { authorization: ['Bearer ', token].join('') },
       });
 
       expect(res.status).toBe(200);
-      const body = (await res.json()) as { repo: { repoId: string } };
+      const body = (await res.json()) as { repo: { repoId: string; role: string } };
       expect(body.repo.repoId).toBe('demo-repo');
+      expect(body.repo.role).toBe('admin');
     });
   });
 
   describe('sync preferences endpoints', () => {
     it('returns null when no preference has been stored yet', async () => {
       const token = await loginAndGetAccessToken();
-      await app.request('/repos', {
-        method: 'POST',
-        headers: { authorization: ['Bearer ', token].join(''), 'content-type': 'application/json' },
-        body: JSON.stringify({ repoId: 'demo-repo' }),
-      });
+      await provisionRepoAsAlice('demo-repo');
 
       const res = await app.request('/repos/demo-repo/sync-preferences', {
         headers: { authorization: ['Bearer ', token].join('') },
@@ -304,11 +320,7 @@ describe('versioning/versioning.router (integration, real HTTP requests via Hono
 
     it('persists per-repo sync preferences when the submitted subset is already FK-closed', async () => {
       const token = await loginAndGetAccessToken();
-      await app.request('/repos', {
-        method: 'POST',
-        headers: { authorization: ['Bearer ', token].join(''), 'content-type': 'application/json' },
-        body: JSON.stringify({ repoId: 'demo-repo' }),
-      });
+      await provisionRepoAsAlice('demo-repo');
 
       const res = await app.request('/repos/demo-repo/sync-preferences', {
         method: 'PUT',
@@ -326,11 +338,7 @@ describe('versioning/versioning.router (integration, real HTTP requests via Hono
 
     it('fails closed with 409 when the client excludes FK-required tables', async () => {
       const token = await loginAndGetAccessToken();
-      await app.request('/repos', {
-        method: 'POST',
-        headers: { authorization: ['Bearer ', token].join(''), 'content-type': 'application/json' },
-        body: JSON.stringify({ repoId: 'demo-repo' }),
-      });
+      await provisionRepoAsAlice('demo-repo');
 
       const res = await app.request('/repos/demo-repo/sync-preferences', {
         method: 'PUT',
@@ -343,11 +351,7 @@ describe('versioning/versioning.router (integration, real HTTP requests via Hono
 
     it('provides a dry-run preview of the FK closure without persisting it', async () => {
       const token = await loginAndGetAccessToken();
-      await app.request('/repos', {
-        method: 'POST',
-        headers: { authorization: ['Bearer ', token].join(''), 'content-type': 'application/json' },
-        body: JSON.stringify({ repoId: 'demo-repo' }),
-      });
+      await provisionRepoAsAlice('demo-repo');
 
       const res = await app.request('/repos/demo-repo/sync-preferences/dry-run', {
         method: 'POST',
@@ -364,11 +368,7 @@ describe('versioning/versioning.router (integration, real HTTP requests via Hono
   describe('history endpoints', () => {
     it('reads repo log with optional branch and clamped limit', async () => {
       const token = await loginAndGetAccessToken();
-      await app.request('/repos', {
-        method: 'POST',
-        headers: { authorization: ['Bearer ', token].join(''), 'content-type': 'application/json' },
-        body: JSON.stringify({ repoId: 'demo-repo' }),
-      });
+      await provisionRepoAsAlice('demo-repo');
 
       const res = await app.request('/repos/demo-repo/log?branch=feature%2Fdemo&limit=200', {
         headers: { authorization: ['Bearer ', token].join('') },
@@ -385,11 +385,7 @@ describe('versioning/versioning.router (integration, real HTTP requests via Hono
 
     it('rejects invalid log query params with 400', async () => {
       const token = await loginAndGetAccessToken();
-      await app.request('/repos', {
-        method: 'POST',
-        headers: { authorization: ['Bearer ', token].join(''), 'content-type': 'application/json' },
-        body: JSON.stringify({ repoId: 'demo-repo' }),
-      });
+      await provisionRepoAsAlice('demo-repo');
 
       const res = await app.request('/repos/demo-repo/log?limit=0', {
         headers: { authorization: ['Bearer ', token].join('') },
@@ -400,11 +396,7 @@ describe('versioning/versioning.router (integration, real HTTP requests via Hono
 
     it('reads repo diff between two refs', async () => {
       const token = await loginAndGetAccessToken();
-      await app.request('/repos', {
-        method: 'POST',
-        headers: { authorization: ['Bearer ', token].join(''), 'content-type': 'application/json' },
-        body: JSON.stringify({ repoId: 'demo-repo' }),
-      });
+      await provisionRepoAsAlice('demo-repo');
 
       const res = await app.request('/repos/demo-repo/diff?from=main&to=feature%2Fdemo', {
         headers: { authorization: ['Bearer ', token].join('') },
@@ -421,11 +413,7 @@ describe('versioning/versioning.router (integration, real HTTP requests via Hono
 
     it('rejects missing diff refs with 400', async () => {
       const token = await loginAndGetAccessToken();
-      await app.request('/repos', {
-        method: 'POST',
-        headers: { authorization: ['Bearer ', token].join(''), 'content-type': 'application/json' },
-        body: JSON.stringify({ repoId: 'demo-repo' }),
-      });
+      await provisionRepoAsAlice('demo-repo');
 
       const res = await app.request('/repos/demo-repo/diff?from=main', {
         headers: { authorization: ['Bearer ', token].join('') },
@@ -438,11 +426,7 @@ describe('versioning/versioning.router (integration, real HTTP requests via Hono
   describe('branch endpoints', () => {
     it('lists branches for an authenticated user', async () => {
       const token = await loginAndGetAccessToken();
-      await app.request('/repos', {
-        method: 'POST',
-        headers: { authorization: ['Bearer ', token].join(''), 'content-type': 'application/json' },
-        body: JSON.stringify({ repoId: 'demo-repo' }),
-      });
+      await provisionRepoAsAlice('demo-repo');
 
       const res = await app.request('/repos/demo-repo/branches', {
         headers: { authorization: ['Bearer ', token].join('') },
@@ -455,11 +439,7 @@ describe('versioning/versioning.router (integration, real HTTP requests via Hono
 
     it('creates a branch for an authenticated user', async () => {
       const token = await loginAndGetAccessToken();
-      await app.request('/repos', {
-        method: 'POST',
-        headers: { authorization: ['Bearer ', token].join(''), 'content-type': 'application/json' },
-        body: JSON.stringify({ repoId: 'demo-repo' }),
-      });
+      await provisionRepoAsAlice('demo-repo');
 
       const res = await app.request('/repos/demo-repo/branches', {
         method: 'POST',
@@ -472,11 +452,7 @@ describe('versioning/versioning.router (integration, real HTTP requests via Hono
 
     it('returns the current branch', async () => {
       const token = await loginAndGetAccessToken();
-      await app.request('/repos', {
-        method: 'POST',
-        headers: { authorization: ['Bearer ', token].join(''), 'content-type': 'application/json' },
-        body: JSON.stringify({ repoId: 'demo-repo' }),
-      });
+      await provisionRepoAsAlice('demo-repo');
 
       const res = await app.request('/repos/demo-repo/branches/current', {
         headers: { authorization: ['Bearer ', token].join('') },
@@ -489,11 +465,7 @@ describe('versioning/versioning.router (integration, real HTTP requests via Hono
 
     it('checks out a branch', async () => {
       const token = await loginAndGetAccessToken();
-      await app.request('/repos', {
-        method: 'POST',
-        headers: { authorization: ['Bearer ', token].join(''), 'content-type': 'application/json' },
-        body: JSON.stringify({ repoId: 'demo-repo' }),
-      });
+      await provisionRepoAsAlice('demo-repo');
 
       const res = await app.request('/repos/demo-repo/branches/feature%2Fdemo/checkout', {
         method: 'POST',
@@ -505,11 +477,7 @@ describe('versioning/versioning.router (integration, real HTTP requests via Hono
 
     it('deletes a branch', async () => {
       const token = await loginAndGetAccessToken();
-      await app.request('/repos', {
-        method: 'POST',
-        headers: { authorization: ['Bearer ', token].join(''), 'content-type': 'application/json' },
-        body: JSON.stringify({ repoId: 'demo-repo' }),
-      });
+      await provisionRepoAsAlice('demo-repo');
 
       const res = await app.request('/repos/demo-repo/branches/feature%2Fdemo', {
         method: 'DELETE',
@@ -523,11 +491,7 @@ describe('versioning/versioning.router (integration, real HTTP requests via Hono
   describe('merge endpoint', () => {
     it('merges a source branch into the current branch', async () => {
       const token = await loginAndGetAccessToken();
-      await app.request('/repos', {
-        method: 'POST',
-        headers: { authorization: ['Bearer ', token].join(''), 'content-type': 'application/json' },
-        body: JSON.stringify({ repoId: 'demo-repo' }),
-      });
+      await provisionRepoAsAlice('demo-repo');
 
       const res = await app.request('/repos/demo-repo/merge', {
         method: 'POST',
@@ -543,11 +507,7 @@ describe('versioning/versioning.router (integration, real HTTP requests via Hono
 
     it('returns a structured 409 payload when Dolt reports conflicts', async () => {
       const token = await loginAndGetAccessToken();
-      await app.request('/repos', {
-        method: 'POST',
-        headers: { authorization: ['Bearer ', token].join(''), 'content-type': 'application/json' },
-        body: JSON.stringify({ repoId: 'demo-repo' }),
-      });
+      await provisionRepoAsAlice('demo-repo');
 
       const res = await app.request('/repos/demo-repo/merge', {
         method: 'POST',
@@ -563,6 +523,112 @@ describe('versioning/versioning.router (integration, real HTTP requests via Hono
       expect(body.error).toContain('Merge conflict');
       expect(body.merge.status).toBe('conflicted');
       expect(body.merge.conflicts[0]?.table).toBe('items');
+    });
+  });
+
+  describe('repo role endpoints and authorization', () => {
+    it('auto-grants repo admin to the creator and denies unassigned users by default', async () => {
+      await provisionRepoAsAlice('secured-repo');
+      const bobToken = await loginAndGetAccessToken('bob', 'another-pass');
+
+      const denied = await app.request('/repos/secured-repo', {
+        headers: { authorization: ['Bearer ', bobToken].join('') },
+      });
+
+      expect(denied.status).toBe(403);
+    });
+
+    it('lets an admin grant, list, and revoke repo roles', async () => {
+      await provisionRepoAsAlice('acl-repo');
+
+      const grantRes = await grantRole('acl-repo', 'bob', 'writer');
+      expect(grantRes.status).toBe(201);
+      const grantBody = (await grantRes.json()) as { role: { username: string; role: string } };
+      expect(grantBody.role.username).toBe('bob');
+      expect(grantBody.role.role).toBe('writer');
+
+      const adminToken = await loginAndGetAccessToken();
+      const listRes = await app.request('/repos/acl-repo/roles', {
+        headers: { authorization: ['Bearer ', adminToken].join('') },
+      });
+      expect(listRes.status).toBe(200);
+      const listBody = (await listRes.json()) as {
+        roles: Array<{ username: string; role: string }>;
+      };
+      expect(listBody.roles.map((entry) => `${entry.username}:${entry.role}`)).toEqual([
+        'alice:admin',
+        'bob:writer',
+      ]);
+
+      const revokeRes = await app.request('/repos/acl-repo/roles/bob', {
+        method: 'DELETE',
+        headers: { authorization: ['Bearer ', adminToken].join('') },
+      });
+      expect(revokeRes.status).toBe(204);
+    });
+
+    it('requires admin role to manage repo roles', async () => {
+      await provisionRepoAsAlice('grant-guard-repo');
+      await grantRole('grant-guard-repo', 'bob', 'reader');
+      const bobToken = await loginAndGetAccessToken('bob', 'another-pass');
+
+      const denied = await app.request('/repos/grant-guard-repo/roles', {
+        method: 'POST',
+        headers: {
+          authorization: ['Bearer ', bobToken].join(''),
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({ username: 'alice', role: 'writer' }),
+      });
+
+      expect(denied.status).toBe(403);
+    });
+
+    it('applies reader/writer/admin permissions across existing endpoints', async () => {
+      await provisionRepoAsAlice('matrix-repo');
+      await grantRole('matrix-repo', 'bob', 'reader');
+      const bobReaderToken = await loginAndGetAccessToken('bob', 'another-pass');
+
+      const readOk = await app.request('/repos/matrix-repo/branches', {
+        headers: { authorization: ['Bearer ', bobReaderToken].join('') },
+      });
+      expect(readOk.status).toBe(200);
+
+      const createDenied = await app.request('/repos/matrix-repo/branches', {
+        method: 'POST',
+        headers: {
+          authorization: ['Bearer ', bobReaderToken].join(''),
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({ name: 'feature/nope' }),
+      });
+      expect(createDenied.status).toBe(403);
+
+      await grantRole('matrix-repo', 'bob', 'writer');
+      const bobWriterToken = await loginAndGetAccessToken('bob', 'another-pass');
+      const createOk = await app.request('/repos/matrix-repo/branches', {
+        method: 'POST',
+        headers: {
+          authorization: ['Bearer ', bobWriterToken].join(''),
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({ name: 'feature/yes' }),
+      });
+      expect(createOk.status).toBe(201);
+
+      const deleteDenied = await app.request('/repos/matrix-repo/branches/feature%2Fyes', {
+        method: 'DELETE',
+        headers: { authorization: ['Bearer ', bobWriterToken].join('') },
+      });
+      expect(deleteDenied.status).toBe(403);
+
+      await grantRole('matrix-repo', 'bob', 'admin');
+      const bobAdminToken = await loginAndGetAccessToken('bob', 'another-pass');
+      const deleteOk = await app.request('/repos/matrix-repo/branches/feature%2Fyes', {
+        method: 'DELETE',
+        headers: { authorization: ['Bearer ', bobAdminToken].join('') },
+      });
+      expect(deleteOk.status).toBe(204);
     });
   });
 });

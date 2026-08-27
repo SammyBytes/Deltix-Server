@@ -66,6 +66,8 @@ describe('versioning boot smoke test (real subprocess, real HTTP server, real Do
         DELTIX_JWT_PRIVATE_KEY: jwtPrivateKeyPem,
         DELTIX_JWT_PUBLIC_KEY: jwtPublicKeyPem,
         DELTIX_LOCAL_USERS: localUsers,
+        DELTIX_BOOTSTRAP_ADMIN_USERNAME: 'alice',
+        DELTIX_BOOTSTRAP_ADMIN_PASSWORD: 's3cret-pass',
         DELTIX_SESSION_DB_PATH: sessionDbPath,
         DELTIX_REPO_DB_PATH: repoDbPath,
         DELTIX_DOLT_REPOS_ROOT_PATH: doltReposRootPath,

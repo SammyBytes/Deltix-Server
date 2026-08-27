@@ -10,6 +10,8 @@ export { AuthService, type AuthServiceConfig } from './auth.service';
 export { createAuthService } from './create-auth-service';
 export {
   InvalidCredentialsError,
+  InvalidRepoRoleError,
+  RepoRoleAssignmentNotFoundError,
   SessionExpiredError,
   SessionNotFoundError,
   SetupAlreadyConfiguredError,
@@ -25,6 +27,8 @@ export type {
   CreateUserInput,
   LocalUser,
   LoginResult,
+  RepoRole,
+  RepoRoleAssignment,
   SetupStatus,
   UserSummary,
 } from './types';

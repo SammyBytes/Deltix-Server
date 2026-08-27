@@ -1,7 +1,7 @@
 # ADR 0002: Fase 5 — Versionado Real sobre Dolt, Gestión de Usuarios en Admin UI y
 # Preferencias de Sincronización
 
-- **Status**: **Fase 5.8 completada parcialmente en código** — mantener este ADR sincronizado con la implementación vigente.
+- **Status**: **Fase 5 completa** — mantener este ADR sincronizado con la implementación vigente.
 - **Date**: 2026-08-27 (Draft)
 - **Owner**: @SammyBytes
 - **Scope**: Deltix-Server (contextos `versioning`, `auth`, `admin-ui`) y Deltix-Client
@@ -170,6 +170,66 @@ modelo de usuarios ya existe de verdad)**.
 - La serialización sigue siendo **in-process**. Es correcta para la topología actual de un único proceso Bun; múltiples instancias sobre el mismo repo físico requerirían un lock distribuido o de filesystem.
 - El cliente CLI (`Deltix-Client`) permanece fuera de alcance en 5.4; esta sub-fase habilita solo la superficie REST server-side.
 
+
+
+## 3.4. Sub-fase 5.6 — Autorización por repo/branch (detalle)
+
+### Problema actual
+- Fases 5.1-5.5 ya exponen repos Dolt reales, branching, merge, log, diff y preferencias de sincronización, pero todo usuario autenticado podía operar sobre cualquier repo provisionado.
+- Eso viola el principio A01 de OWASP/ASVS para un control plane multiusuario: autenticación sin autorización server-side por recurso sigue siendo broken access control.
+- El ADR original pidió explícitamente una “extensión de `auth` con ACL nueva hacia `versioning`” y además aclaró “NO RBAC granular todavía, mantener simple”, por lo que esta sub-fase debe cerrar el hueco sin inventar un sistema de permisos complejo.
+
+### Alcance propuesto
+1. **Modelo simple de roles por repo**:
+   - Cada asignación se modela como `(username, repoId, role)`.
+   - `role` solo puede ser `reader`, `writer` o `admin`.
+   - No se implementan permisos por branch ni matriz granular por acción en esta entrega, aunque la fila resumida diga `repo/branch`; se resuelve deliberadamente a **per-repo only** por consistencia con “mantener simple”.
+2. **Persistencia dentro de `auth`**:
+   - La tabla nueva `repo_roles` vive en la misma libSQL del contexto `auth` (`DELTIX_USER_DB_PATH`).
+   - `versioning` no sabe nada del storage físico; solo consume métodos públicos expuestos por el barrel de `auth` (`getRepoRole`, `grantRepoRole`, `revokeRepoRole`, `listRepoRoles`).
+   - Esta decisión sigue la regla ACL del repositorio: nada de imports cruzados a internals, y la autorización sigue siendo responsabilidad del contexto `auth` aunque proteja recursos del contexto `versioning`.
+3. **Bootstrap del primer acceso**:
+   - `POST /api/v1/versioning/repos` sigue siendo la única operación de creación sin ACL previa sobre ese repo, porque el repo todavía no existe.
+   - Después de provisionar exitosamente, el server auto-otorga `admin` al usuario creador del repo.
+   - Esto evita el problema clásico de “¿quién concede el primer permiso?” sin abrir bypasses globales ni superusers implícitos.
+4. **REST de administración de roles**:
+   - `GET /api/v1/versioning/repos/:repoId/roles` lista asignaciones del repo.
+   - `POST /api/v1/versioning/repos/:repoId/roles` crea/actualiza `{ username, role }`.
+   - `DELETE /api/v1/versioning/repos/:repoId/roles/:username` revoca el acceso.
+   - Solo `admin` puede mutar roles; la lectura se permite a `reader+` porque ya implica acceso autorizado al repo.
+5. **Fail-closed total**:
+   - Un usuario autenticado sin asignación para un repo recibe `403` en todos los endpoints de `versioning` (lectura y escritura) salvo la creación de un repo nuevo.
+   - No se introduce bypass legacy, “owner global”, ni seed implícito para repos existentes. Los tests/fixtures se actualizan para otorgar el rol requerido explícitamente.
+
+### Matriz de permisos resuelta
+| Operación / endpoint | reader | writer | admin |
+|---|---|---|---|
+| `GET /repos` (solo los visibles) | ✅ | ✅ | ✅ |
+| `GET /repos/:repoId` | ✅ | ✅ | ✅ |
+| `GET /repos/:repoId/roles` | ✅ | ✅ | ✅ |
+| `GET /repos/:repoId/branches` | ✅ | ✅ | ✅ |
+| `GET /repos/:repoId/branches/current` | ✅ | ✅ | ✅ |
+| `GET /repos/:repoId/log` | ✅ | ✅ | ✅ |
+| `GET /repos/:repoId/diff` | ✅ | ✅ | ✅ |
+| `POST /repos/:repoId/branches` | ❌ | ✅ | ✅ |
+| `POST /repos/:repoId/branches/:name/checkout` | ❌ | ✅ | ✅ |
+| `POST /repos/:repoId/merge` | ❌ | ✅ | ✅ |
+| `DELETE /repos/:repoId/branches/:name` | ❌ | ❌ | ✅ |
+| `GET/PUT/POST /repos/:repoId/sync-preferences*` | ❌ | ❌ | ✅ |
+| `POST /repos/:repoId/roles` | ❌ | ❌ | ✅ |
+| `DELETE /repos/:repoId/roles/:username` | ❌ | ❌ | ✅ |
+
+### Decisiones de diseño resueltas
+- **Dónde vive la ACL**: se eligió `auth` y no `versioning` porque la propia fila 5.6 habla de una “extensión de `auth`”. Además, `auth` ya es dueño de usernames, sesiones y user DB; sumar `repo_roles` ahí mantiene identidad + autorización juntas y evita filtrar detalles de storage al contexto consumidor.
+- **`GET /repos` filtrado, no 403 global**: para el listado se devuelve solo el subconjunto visible al usuario, en vez de fallar si existe algún repo inaccesible. Esto hace al endpoint útil como inventario de “mis repos” sin exponer metadatos de repos ajenos.
+- **Repos inexistentes vs no autorizados**: una vez aplicada la ACL, `GET /repos/:repoId` devuelve `403` si el usuario no tiene acceso, incluso si no existe asignación previa para ese repoId. Esto prioriza no filtrar existencia de recursos a usuarios no autorizados.
+- **Error tipado nuevo**: `RepoAccessDeniedError` vive en `versioning/errors.ts` porque la traducción HTTP 403 y el contrato REST pertenecen al contexto `versioning`, aunque la decisión de autorización se consulte a `auth`.
+
+### Implicaciones / límites conocidos
+- No hay permisos por branch todavía. El texto “repo/branch” del resumen se documenta aquí como shorthand histórico; la implementación real es repo-scoped hasta una futura fase de RBAC granular.
+- `CommitService.recordPush()` sigue sin revalidar ACL por sí mismo porque hoy se dispara desde el flujo de tickets/storage ya autenticado; esta sub-fase cubre completamente la superficie REST existente de `versioning`, que era el hueco explícito del ADR.
+- Los repos creados antes de 5.6 quedan inaccesibles hasta que un admin les asigne roles manualmente. Se acepta como comportamiento fail-closed de MVP en lugar de introducir migraciones mágicas o bypasses inseguros.
+
 ## 3. Sub-fase 5.7 — Gestión de usuarios en Admin UI (detalle)
 
 ### Problema actual
@@ -323,6 +383,6 @@ modelo de usuarios ya existe de verdad)**.
 | 5.3 | ✅ Completa — `BranchService` + `dolt-branch-cli` exponen create/list/current/checkout/delete reales sobre repos provisionados, con validación defensiva de nombres, protección de `main`, rechazo de borrar la rama activa y endpoints JWT `/api/v1/versioning/repos/:repoId/branches*`; operaciones mutantes serializadas por repo con mutex in-process. |
 | 5.4 | ✅ Completa — `MergeService` + `dolt-merge-cli` exponen `POST /api/v1/versioning/repos/:repoId/merge`, ejecutan `dolt merge` real, traducen `dolt_conflicts*` a JSON estructurado y auto-abortan merges conflictuados tras capturar conflictos para dejar el working tree limpio y predecible. |
 | 5.5 | ✅ Completada |
-| 5.6 | ⏳ No iniciada |
+| 5.6 | ✅ Completa — ACL simple por repo (`reader`/`writer`/`admin`) propiedad de `auth`, aplicada a todos los endpoints de `versioning`, con bootstrap auto-admin al creador y administración de roles vía REST |
 | 5.7 | ✅ Completa — `contexts/auth` migra a `LibsqlUserStore` con bootstrap env opcional + fallback legacy `DELTIX_LOCAL_USERS`; `AuthService` agrega setup inicial race-safe, CRUD/soft-delete/hard-delete con analítica de sesiones activas, y Admin UI incorpora `/admin/setup` + panel `/admin/users` con tours driver.js independientes. |
 | 5.8 | ✅ Completa — `contexts/versioning` ahora persiste preferencias por repo en la misma libSQL de `repos`, expone `GET/PUT /api/v1/versioning/repos/:repoId/sync-preferences` y `POST /api/v1/versioning/repos/:repoId/sync-preferences/dry-run`, y revalida server-side el cierre transitivo de FKs antes de aceptar overrides por ticket/push. |

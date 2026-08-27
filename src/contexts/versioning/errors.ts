@@ -87,6 +87,13 @@ export class ProtectedBranchError extends Error {
   }
 }
 
+export class RepoAccessDeniedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'RepoAccessDeniedError';
+  }
+}
+
 export class MergeConflictError extends Error {
   constructor(
     message: string,

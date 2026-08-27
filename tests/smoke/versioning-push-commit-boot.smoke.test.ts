@@ -57,6 +57,7 @@ describe('versioning push-commit boot smoke test (real subprocess, real TLS gRPC
     licenseRepoPath = await initTempDoltRepo();
     doltReposRootPath = await mkdtemp(join(tmpdir(), 'deltix-versioning-push-smoke-repos-'));
     const sessionDbPath = join(await mkdtemp(join(tmpdir(), 'deltix-sessions-')), 'sessions.db');
+    const userDbPath = join(await mkdtemp(join(tmpdir(), 'deltix-users-')), 'users.db');
     const ticketDbPath = join(await mkdtemp(join(tmpdir(), 'deltix-tickets-')), 'tickets.db');
     const jobDbPath = join(await mkdtemp(join(tmpdir(), 'deltix-jobs-')), 'jobs.db');
     const repoDbPath = join(await mkdtemp(join(tmpdir(), 'deltix-repos-')), 'repos.db');
@@ -87,6 +88,9 @@ describe('versioning push-commit boot smoke test (real subprocess, real TLS gRPC
         DELTIX_JWT_PRIVATE_KEY: jwtPrivateKeyPem,
         DELTIX_JWT_PUBLIC_KEY: jwtPublicKeyPem,
         DELTIX_LOCAL_USERS: localUsers,
+        DELTIX_USER_DB_PATH: userDbPath,
+        DELTIX_BOOTSTRAP_ADMIN_USERNAME: 'alice',
+        DELTIX_BOOTSTRAP_ADMIN_PASSWORD: 's3cret-pass',
         DELTIX_SESSION_DB_PATH: sessionDbPath,
         DELTIX_TICKET_DB_PATH: ticketDbPath,
         DELTIX_TICKET_TTL_SECONDS: '120',

@@ -91,6 +91,16 @@ function createInMemoryUserStore(): UserStore {
     async legacyUsers() {
       return [];
     },
+    async getRepoRole() {
+      return null;
+    },
+    async listRepoRoles() {
+      return [];
+    },
+    async upsertRepoRole() {},
+    async deleteRepoRole() {
+      return false;
+    },
   };
 }
 

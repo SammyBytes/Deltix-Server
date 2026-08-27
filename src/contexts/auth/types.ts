@@ -1,3 +1,13 @@
+export type RepoRole = 'reader' | 'writer' | 'admin';
+
+export interface RepoRoleAssignment {
+  username: string;
+  repoId: string;
+  role: RepoRole;
+  grantedAt: number;
+  grantedBy: string;
+}
+
 export interface LocalUser {
   username: string;
   passwordHash: string;
