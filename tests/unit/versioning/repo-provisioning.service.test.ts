@@ -23,6 +23,8 @@ function createInMemoryRepoStore(): RepoStore {
     },
     get: async (repoId) => records.get(repoId) ?? null,
     list: async () => Array.from(records.values()),
+    getSyncPreference: async () => null,
+    upsertSyncPreference: async () => {},
   };
 }
 

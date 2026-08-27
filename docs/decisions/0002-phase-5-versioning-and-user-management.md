@@ -44,6 +44,42 @@ mismo patrón que Fases 1-4. Ninguna sub-fase empieza sin luz verde explícita d
 | 5.1 | **Repo Dolt real por proyecto** | `dolt init` aislado por repo lógico; tabla `repo_id ↔ ruta Dolt` en libSQL (mismo patrón que `addon-trust.db`) | Server |
 | 5.2 | **Commit real en push** | Al llegar el payload a staging y verificarse el checksum, aplicarlo a las tablas Dolt y ejecutar `dolt add -A && dolt commit` con autor = usuario autenticado | Server, Client (mostrar `commit_id`) |
 | 5.3 | **Branching** | `dolt branch` / `dolt checkout` reales, expuestos vía API y CLI | Server, Client |
+
+
+## 3.1. Sub-fase 5.3 — Branching (detalle)
+
+### Problema actual
+- Fase 5.1/5.2 ya provisionan un repo Dolt real y registran commits reales, pero todo ocurre sobre la rama actualmente activa del working directory sin una API explícita para crear, listar, cambiar o borrar ramas.
+- Sin branching real, no existe todavía el flujo Git-style mínimo para aislar cambios de schema/datos antes de futuros merge/conflict workflows.
+
+### Alcance propuesto
+1. **Crear rama**:
+   - Exponer `POST /api/v1/versioning/repos/:repoId/branches` para crear una rama real usando `dolt branch <branchName>`.
+   - La creación no hace checkout implícito: crear y cambiar de rama se modelan como operaciones distintas para mantener una API explícita y predecible.
+2. **Listar ramas**:
+   - Exponer `GET /api/v1/versioning/repos/:repoId/branches`.
+   - Leer la lista estructurada desde la system table `dolt_branches` vía `dolt sql`, evitando parsear el listado humano del CLI para el inventario de ramas.
+   - Resolver la rama actual leyendo el marcador `*` de `dolt branch`, porque en Dolt 2.3.0 `dolt_branches` no expone una columna booleana `current`.
+3. **Rama actual / checkout**:
+   - Exponer `GET /api/v1/versioning/repos/:repoId/branches/current` y `POST /api/v1/versioning/repos/:repoId/branches/:name/checkout`.
+   - `checkout` ejecuta un `dolt checkout <branchName>` real sobre el working directory provisionado para ese repo.
+4. **Borrado seguro**:
+   - Exponer `DELETE /api/v1/versioning/repos/:repoId/branches/:name`.
+   - Rechazar el borrado de la rama actualmente checked out.
+   - Rechazar el borrado de la rama protegida por defecto `main`.
+5. **Validación defensiva**:
+   - Validar nombres de rama antes de shell-out con un allow-list conservador (`/^[A-Za-z0-9_][A-Za-z0-9_.\-/]{0,127}$/`) y rechazar además espacios, `..`, y `/` al inicio/fin.
+   - Esto complementa el auto-quoting de `Bun.$`; no lo reemplaza.
+
+### Decisiones de diseño resueltas
+- **Fuente de verdad para listar ramas**: se usa `dolt_branches` por ser salida estructurada y más robusta que parsear el listado humano completo. Solo se parsea `dolt branch` para saber cuál está marcada con `*`, porque Dolt 2.3.0 no expone esa señal en la tabla.
+- **Checkout y concurrencia**: dado que cada repo provisionado tiene un único working directory real, `checkout` no es una vista virtual por request sino una mutación real del filesystem. Se agrega un mutex en memoria por `repoId` dentro de `BranchService` para serializar create/checkout/delete y evitar carreras entre mutaciones de rama concurrentes dentro del mismo proceso.
+- **Impacto en commits de push**: `CommitService.recordPush()` sigue siendo branch-agnostic en 5.3. Los pushes graban commits sobre la rama que esté actualmente checked out en ese working directory al momento del commit. No se cambia todavía el contrato del push para fijar una rama explícita porque eso pertenece naturalmente a futuras sub-fases de autorización/merge.
+- **Regla de protección**: se protege `main` explícitamente aunque Dolt ya falle si se intenta borrar la rama activa; así la API devuelve un error de dominio claro y consistente antes del shell-out.
+
+### Implicaciones / límites conocidos
+- El mutex es **in-process**, suficiente para la topología actual de un único proceso Bun. Si en el futuro hubiera múltiples instancias apuntando al mismo repo físico, haría falta un lock distribuido o por filesystem.
+- Los comandos CLI del cliente para branching siguen fuera de alcance en esta sub-fase; solo se habilita la superficie server-side.
 | 5.4 | **Merge y conflictos** | `dolt merge`, traduciendo conflictos SQL crudos a JSON estructurado y legible | Server, Client |
 | 5.5 | **Historial / diff navegable** | `dolt_log` / `dolt_diff` (mismo patrón de lectura ya usado en `licensing/dolt-commit-log.reader.ts`) expuestos como `deltix log` / `deltix diff` | Server, Client |
 | 5.6 | **Autorización por repo/branch** | Extensión de `auth` con ACL nueva hacia `versioning` (rol simple por repo: lector/escritor/admin — NO RBAC granular todavía, mantener simple) | Server |
@@ -208,7 +244,7 @@ modelo de usuarios ya existe de verdad)**.
 |---|---|
 | 5.1 | ✅ Completa — `contexts/versioning` (RepoProvisioningService + LibsqlRepoStore + `dolt init` real vía Bun.$ + router JWT-autenticado `/api/v1/versioning/repos`); 25 tests (unit+integration+smoke) en verde |
 | 5.2 | ✅ Completa — `CommitService` + `runDoltCommit` real (upsert en `deltix_push_log` + `dolt add -A && dolt commit --author`), invocado best-effort tras `PushSessionHandler.finish()` vía hook inyectado (`OnPushCommitted`, ACL storage→versioning); repos sin provisionar via 5.1 quedan como no-op retrocompatible. Client `commit_id` visible queda para una iteración posterior. 34 tests nuevos (unit+integration+smoke) en verde |
-| 5.3 | ⏳ No iniciada |
+| 5.3 | ✅ Completa — `BranchService` + `dolt-branch-cli` exponen create/list/current/checkout/delete reales sobre repos provisionados, con validación defensiva de nombres, protección de `main`, rechazo de borrar la rama activa y endpoints JWT `/api/v1/versioning/repos/:repoId/branches*`; operaciones mutantes serializadas por repo con mutex in-process. |
 | 5.4 | ⏳ No iniciada |
 | 5.5 | ⏳ No iniciada |
 | 5.6 | ⏳ No iniciada |

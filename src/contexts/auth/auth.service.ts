@@ -126,7 +126,11 @@ export class AuthService {
     const users = await this.userStore.list();
     return Promise.all(
       users.map(async (user) => ({
-        ...user,
+        username: user.username,
+        createdAt: user.createdAt,
+        createdBy: user.createdBy,
+        active: user.active,
+        lastLoginAt: user.lastLoginAt,
         activeSessions: await this.sessionStore.countActiveSessionsForUser(
           user.username,
           this.now(),

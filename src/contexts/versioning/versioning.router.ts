@@ -1,9 +1,15 @@
+import type { Context } from 'hono';
 import { Hono } from 'hono';
 import { z } from 'zod';
 import { createLogger } from '../../shared/logger';
 import type { AuthService } from '../auth';
+import type { BranchService } from './branch.service';
 import {
+  BranchAlreadyExistsError,
+  BranchNotFoundError,
+  InvalidBranchNameError,
   InvalidRepoIdError,
+  ProtectedBranchError,
   RepoAlreadyProvisionedError,
   RepoNotFoundError,
   SyncPreferenceConflictError,
@@ -15,6 +21,10 @@ const logger = createLogger('http:versioning');
 
 const provisionRequestSchema = z.object({
   repoId: z.string().min(1).max(64),
+});
+
+const branchRequestSchema = z.object({
+  name: z.string().min(1).max(128),
 });
 
 const syncRequestSchema = z.object({
@@ -41,10 +51,7 @@ async function authenticate(
   }
 }
 
-async function requireUsername(
-  c: Parameters<Hono['get']>[1] extends (arg: infer T) => unknown ? T : never,
-  authService: AuthService,
-) {
+async function requireUsername(c: Context, authService: AuthService) {
   const username = await authenticate(c.req.header('authorization'), authService);
   if (!username) {
     return c.json({ error: 'Unauthorized' }, 401);
@@ -52,12 +59,7 @@ async function requireUsername(
   return username;
 }
 
-function parseSyncBody(
-  parsed: z.SafeParseReturnType<
-    unknown,
-    { mode: 'schema_only' | 'schema_and_data'; tables?: string[] | null | undefined }
-  >,
-) {
+function parseSyncBody(parsed: z.ZodSafeParseResult<z.infer<typeof syncRequestSchema>>) {
   if (!parsed.success) {
     return {
       ok: false as const,
@@ -68,6 +70,23 @@ function parseSyncBody(
     ok: true as const,
     data: { mode: parsed.data.mode, tables: parsed.data.tables ?? null },
   };
+}
+
+function handleBranchError(err: unknown, fallback: string) {
+  if (err instanceof InvalidRepoIdError || err instanceof InvalidBranchNameError) {
+    return { body: { error: err.message }, status: 400 };
+  }
+  if (err instanceof RepoNotFoundError || err instanceof BranchNotFoundError) {
+    return { body: { error: err.message }, status: 404 };
+  }
+  if (
+    err instanceof BranchAlreadyExistsError ||
+    err instanceof ProtectedBranchError ||
+    err instanceof RepoAlreadyProvisionedError
+  ) {
+    return { body: { error: err.message }, status: 409 };
+  }
+  return { body: { error: fallback }, status: 500 };
 }
 
 function handleSyncError(err: unknown, fallback: string) {
@@ -87,6 +106,7 @@ export function createVersioningRouter(
   authService: AuthService,
   provisioningService: RepoProvisioningService,
   syncPreferenceService?: SyncPreferenceService,
+  branchService?: BranchService,
 ): Hono {
   const app = new Hono();
 
@@ -139,6 +159,85 @@ export function createVersioningRouter(
     }
     return c.json({ repo }, 200);
   });
+
+  if (branchService) {
+    app.get('/repos/:repoId/branches', async (c) => {
+      const username = await requireUsername(c, authService);
+      if (typeof username !== 'string') {
+        return username;
+      }
+      try {
+        const branches = await branchService.list(c.req.param('repoId'));
+        return c.json({ branches }, 200);
+      } catch (err) {
+        const handled = handleBranchError(err, 'Failed to list branches');
+        return c.json(handled.body, handled.status as 400 | 404 | 409 | 500);
+      }
+    });
+
+    app.post('/repos/:repoId/branches', async (c) => {
+      const username = await requireUsername(c, authService);
+      if (typeof username !== 'string') {
+        return username;
+      }
+      const parsed = branchRequestSchema.safeParse(await c.req.json().catch(() => null));
+      if (!parsed.success) {
+        return c.json({ error: 'Invalid request body', details: parsed.error.issues }, 400);
+      }
+      try {
+        const branch = await branchService.create(c.req.param('repoId'), parsed.data.name);
+        return c.json({ branch }, 201);
+      } catch (err) {
+        const handled = handleBranchError(err, 'Failed to create branch');
+        return c.json(handled.body, handled.status as 400 | 404 | 409 | 500);
+      }
+    });
+
+    app.get('/repos/:repoId/branches/current', async (c) => {
+      const username = await requireUsername(c, authService);
+      if (typeof username !== 'string') {
+        return username;
+      }
+      try {
+        const name = await branchService.current(c.req.param('repoId'));
+        return c.json({ branch: { name } }, 200);
+      } catch (err) {
+        const handled = handleBranchError(err, 'Failed to read current branch');
+        return c.json(handled.body, handled.status as 400 | 404 | 409 | 500);
+      }
+    });
+
+    app.post('/repos/:repoId/branches/:name/checkout', async (c) => {
+      const username = await requireUsername(c, authService);
+      if (typeof username !== 'string') {
+        return username;
+      }
+      try {
+        const branch = await branchService.checkout(
+          c.req.param('repoId'),
+          decodeURIComponent(c.req.param('name')),
+        );
+        return c.json({ branch }, 200);
+      } catch (err) {
+        const handled = handleBranchError(err, 'Failed to checkout branch');
+        return c.json(handled.body, handled.status as 400 | 404 | 409 | 500);
+      }
+    });
+
+    app.delete('/repos/:repoId/branches/:name', async (c) => {
+      const username = await requireUsername(c, authService);
+      if (typeof username !== 'string') {
+        return username;
+      }
+      try {
+        await branchService.delete(c.req.param('repoId'), decodeURIComponent(c.req.param('name')));
+        return c.body(null, 204);
+      } catch (err) {
+        const handled = handleBranchError(err, 'Failed to delete branch');
+        return c.json(handled.body, handled.status as 400 | 404 | 409 | 500);
+      }
+    });
+  }
 
   if (syncPreferenceService) {
     app.get('/repos/:repoId/sync-preferences', async (c) => {

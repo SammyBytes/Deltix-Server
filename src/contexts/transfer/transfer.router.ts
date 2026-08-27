@@ -9,6 +9,7 @@ import {
   TicketOperationMismatchError,
 } from './errors';
 import type { TicketService } from './ticket.service';
+import type { PushTicketSyncOptions } from './types';
 
 const logger = createLogger('http:transfer');
 
@@ -49,6 +50,25 @@ async function authenticate(
   }
 }
 
+function toPushTicketSyncOptions(
+  sync: z.infer<typeof syncOptionsSchema>,
+): PushTicketSyncOptions | null {
+  if (!sync) {
+    return null;
+  }
+  const options: PushTicketSyncOptions = {};
+  if (sync.mode !== undefined) {
+    options.mode = sync.mode;
+  }
+  if (sync.tables !== undefined) {
+    options.tables = sync.tables;
+  }
+  if (sync.dryRun !== undefined) {
+    options.dryRun = sync.dryRun;
+  }
+  return options;
+}
+
 export function createTransferRouter(authService: AuthService, ticketService: TicketService) {
   const app = new Hono();
 
@@ -63,7 +83,8 @@ export function createTransferRouter(authService: AuthService, ticketService: Ti
       return c.json({ error: 'Invalid request body' }, 400);
     }
 
-    const syncOptions = parsed.data.operation === 'push' ? (parsed.data.sync ?? null) : null;
+    const syncOptions =
+      parsed.data.operation === 'push' ? toPushTicketSyncOptions(parsed.data.sync) : null;
     const ticket = await ticketService.issueTicket(
       username,
       parsed.data.operation,

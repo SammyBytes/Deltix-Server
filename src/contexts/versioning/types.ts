@@ -16,3 +16,8 @@ export interface RepoSyncPreferenceSummary {
   mode: 'schema_only' | 'schema_and_data';
   requestedTables: string[] | null;
 }
+
+export interface BranchSummary {
+  name: string;
+  isCurrent: boolean;
+}

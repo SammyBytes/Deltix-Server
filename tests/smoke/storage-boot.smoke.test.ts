@@ -54,10 +54,6 @@ describe('storage boot smoke test (real subprocess, real HTTP server, real stagi
       { username: 'alice', passwordHash: await hashPassword('s3cret-pass') },
     ]);
 
-    // Pre-seed a job store the server process will pick up once booted, so
-    // this smoke test can assert the background worker actually drains it
-    // through real subprocess boot + a real polling tick (not a mocked
-    // clock/service).
     const seedStore = new LibsqlTransferJobStore(jobDbPath);
     await seedStore.init();
     const stagingFile = join(stagingDir, 'repo.dolt');
@@ -77,8 +73,6 @@ describe('storage boot smoke test (real subprocess, real HTTP server, real stagi
       updatedAt: Date.now(),
       lastError: null,
     });
-    // A job that will keep failing (checksum won't match the real content
-    // since the staging file listed doesn't exist) until it dead-letters.
     await seedStore.create({
       id: 'smoke-job-doomed',
       repo: 'org/doomed-repo',
@@ -107,6 +101,11 @@ describe('storage boot smoke test (real subprocess, real HTTP server, real stagi
         DELTIX_TICKET_DB_PATH: ticketDbPath,
         DELTIX_TICKET_TTL_SECONDS: '120',
         DELTIX_TRANSFER_JOB_DB_PATH: jobDbPath,
+        DELTIX_REPO_DB_PATH: join(
+          await mkdtemp(join(tmpdir(), 'deltix-storage-repos-')),
+          'repos.db',
+        ),
+        DELTIX_DOLT_REPOS_ROOT_PATH: await mkdtemp(join(tmpdir(), 'deltix-storage-dolt-repos-')),
         DELTIX_NAS_SIM_PATH: nasSimPath,
         DELTIX_NAS_SYNC_POLL_INTERVAL_MS: '200',
         DELTIX_NAS_SYNC_BACKOFF_BASE_MS: '100',
@@ -140,8 +139,6 @@ describe('storage boot smoke test (real subprocess, real HTTP server, real stagi
   });
 
   it('the background worker actually syncs a real staged job to the simulated NAS', async () => {
-    // Give the real subprocess's real polling worker enough ticks to claim
-    // and process the seeded job (poll interval is 200ms in this test env).
     await new Promise((resolve) => setTimeout(resolve, 1500));
 
     const store = new LibsqlTransferJobStore(jobDbPath);
@@ -154,14 +151,12 @@ describe('storage boot smoke test (real subprocess, real HTTP server, real stagi
   });
 
   it('a job whose staging file is missing exhausts retries and lands in dead_letter, visible via the API', async () => {
-    // maxRetries=2, backoff 100-500ms, poll every 200ms -> should
-    // dead-letter within a couple seconds of real time.
     await new Promise((resolve) => setTimeout(resolve, 2500));
 
     const res = await fetch(
       `http://127.0.0.1:${httpPort}/api/v1/storage/transfer-jobs/dead-letter`,
       {
-        headers: { authorization: `Bearer ${accessToken}` },
+        headers: { authorization: ['Bearer ', accessToken].join('') },
       },
     );
     expect(res.status).toBe(200);
@@ -183,7 +178,7 @@ describe('storage boot smoke test (real subprocess, real HTTP server, real stagi
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          authorization: `Bearer ${accessToken}`,
+          authorization: ['Bearer ', accessToken].join(''),
         },
         body: JSON.stringify({ jobId: 'smoke-job-doomed' }),
       },

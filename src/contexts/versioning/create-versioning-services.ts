@@ -1,5 +1,13 @@
 import type { Env } from '../../shared/env';
+import { BranchService } from './branch.service';
 import { CommitService } from './commit.service';
+import {
+  runDoltCheckoutBranch,
+  runDoltCreateBranch,
+  runDoltCurrentBranch,
+  runDoltDeleteBranch,
+  runDoltListBranches,
+} from './dolt-branch-cli';
 import { runDoltInit } from './dolt-cli';
 import { runDoltCommit } from './dolt-commit-cli';
 import { readForeignKeyEdges } from './dolt-foreign-key-reader';
@@ -10,6 +18,7 @@ import { SyncPreferenceService } from './sync-preference.service';
 export interface VersioningServices {
   repoProvisioningService: RepoProvisioningService;
   commitService: CommitService;
+  branchService: BranchService;
   syncPreferenceService: SyncPreferenceService;
 }
 
@@ -23,6 +32,13 @@ export async function createVersioningServices(env: Env): Promise<VersioningServ
       env.DELTIX_DOLT_REPOS_ROOT_PATH,
     ),
     commitService: new CommitService(store, runDoltCommit),
+    branchService: new BranchService(store, {
+      runDoltListBranches,
+      runDoltCurrentBranch,
+      runDoltCreateBranch,
+      runDoltCheckoutBranch,
+      runDoltDeleteBranch,
+    }),
     syncPreferenceService: new SyncPreferenceService(store, readForeignKeyEdges),
   };
 }

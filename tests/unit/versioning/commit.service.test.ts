@@ -2,10 +2,11 @@ import { beforeEach, describe, expect, it, mock } from 'bun:test';
 import { CommitService } from '../../../src/contexts/versioning/commit.service';
 import { CommitFailedError } from '../../../src/contexts/versioning/errors';
 import type { RepoStore } from '../../../src/contexts/versioning/repo-store';
-import type { RepoRecord } from '../../../src/contexts/versioning/types';
+import type { RepoRecord, RepoSyncPreferenceSummary } from '../../../src/contexts/versioning/types';
 
 class InMemoryRepoStore implements RepoStore {
   private records = new Map<string, RepoRecord>();
+  private syncPreferences = new Map<string, RepoSyncPreferenceSummary>();
 
   async init(): Promise<void> {}
 
@@ -19,6 +20,23 @@ class InMemoryRepoStore implements RepoStore {
 
   async list(): Promise<RepoRecord[]> {
     return [...this.records.values()];
+  }
+
+  async getSyncPreference(repoId: string): Promise<RepoSyncPreferenceSummary | null> {
+    return this.syncPreferences.get(repoId) ?? null;
+  }
+
+  async upsertSyncPreference(params: {
+    repoId: string;
+    mode: RepoSyncPreferenceSummary['mode'];
+    requestedTables: string[] | null;
+    createdAt: number;
+    updatedAt: number;
+  }): Promise<void> {
+    this.syncPreferences.set(params.repoId, {
+      mode: params.mode,
+      requestedTables: params.requestedTables,
+    });
   }
 }
 

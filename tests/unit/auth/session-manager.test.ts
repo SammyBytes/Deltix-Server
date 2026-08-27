@@ -20,6 +20,15 @@ function inMemoryStore(): SessionStore {
     async revoke(refreshToken) {
       rows.delete(refreshToken);
     },
+    async countActiveSessionsForUser(username, now) {
+      let count = 0;
+      for (const row of rows.values()) {
+        if (row.username === username && row.expiresAt > now) {
+          count += 1;
+        }
+      }
+      return count;
+    },
   };
 }
 

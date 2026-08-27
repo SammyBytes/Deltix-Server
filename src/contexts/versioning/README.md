@@ -48,6 +48,47 @@ into `dolt sql -q` are either server-generated (UUID/hex, shape-validated
 before interpolation) or sanitized (author name), never raw, unsanitized
 user input.
 
+## Fase 5.3 — branching
+
+`BranchService` exposes real branch lifecycle operations on provisioned
+repos, backed by the new `dolt-branch-cli.ts` wrapper:
+
+- `runDoltListBranches()` reads `dolt_branches` via `dolt sql` and uses
+  `dolt branch` only to determine which branch is currently checked out for
+  the working directory used by that repo.
+- `runDoltCreateBranch()` shells out to `dolt branch <name>`.
+- `runDoltCheckoutBranch()` shells out to `dolt checkout <name>`.
+- `runDoltDeleteBranch()` shells out to `dolt branch -d <name>`.
+- `runDoltCurrentBranch()` parses the current `* <branch>` marker from the
+  real `dolt branch` output.
+
+Branch names are validated server-side against
+`/^[A-Za-z0-9_][A-Za-z0-9_.\-/]{0,127}$/`, then additionally rejected if
+they contain whitespace, `..`, or leading/trailing `/`. This is
+defense-in-depth on top of `Bun.$` argument quoting.
+
+REST API surface (same JWT `authenticate` / `requireUsername` pattern as
+existing versioning routes):
+
+- `GET /api/v1/versioning/repos/:repoId/branches`
+- `POST /api/v1/versioning/repos/:repoId/branches`
+- `GET /api/v1/versioning/repos/:repoId/branches/current`
+- `POST /api/v1/versioning/repos/:repoId/branches/:name/checkout`
+- `DELETE /api/v1/versioning/repos/:repoId/branches/:name`
+
+Because each provisioned repo has one real working directory, branch
+checkout is a filesystem-level mutation. `BranchService` serializes
+create/checkout/delete operations per repo with an in-process mutex so a
+checkout cannot race another branch mutation on the same repo. Commits keep
+recording against whatever branch is currently checked out in that working
+directory; `CommitService.recordPush()` itself remains branch-agnostic in
+this sub-phase.
+
+Protected-branch rules enforced by the service:
+
+- current checked-out branch cannot be deleted
+- `main` cannot be deleted
+
 ## Fase 5.8 — sync preferences
 
 `LibsqlRepoStore` now persists per-repo sync preferences in the same libSQL
@@ -75,6 +116,5 @@ boundary.
 
 ## Not yet implemented
 
-- Branching (`dolt branch`/`checkout`), merge/conflicts, log/diff, and
-  per-repo/branch authorization — see the ADR for the remaining Fase 5
-  sub-phases.
+- merge/conflicts, log/diff, and per-repo/branch authorization — see the
+  ADR for the remaining Fase 5 sub-phases.

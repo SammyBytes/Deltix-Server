@@ -48,7 +48,7 @@ async function main(): Promise<void> {
   const ticketService = await createTicketService(env);
   const nasSyncService = await createNasSyncService(env);
   const addonTrustStore = await createAddonTrustStore(env);
-  const { repoProvisioningService, commitService, syncPreferenceService } =
+  const { repoProvisioningService, commitService, branchService, syncPreferenceService } =
     await createVersioningServices(env);
   const secureCookies = env.NODE_ENV === 'production';
   const authRouter = createAuthRouter(authService, secureCookies);
@@ -59,6 +59,7 @@ async function main(): Promise<void> {
     authService,
     repoProvisioningService,
     syncPreferenceService,
+    branchService,
   );
   const app = new Hono();
   applySecurityMiddleware(app, { allowedOrigins: env.DELTIX_CORS_ALLOWED_ORIGINS });
@@ -114,8 +115,8 @@ async function main(): Promise<void> {
         return { repo, username, stagingPath, dryRun: parsed?.dryRun ?? false };
       }
       const validation = await syncPreferenceService.validatePushOptions(repo, {
-        mode: parsed?.mode,
-        tables: parsed?.tables ?? undefined,
+        ...(parsed?.mode !== undefined ? { mode: parsed.mode } : {}),
+        ...(parsed?.tables !== undefined ? { tables: parsed.tables } : {}),
         dryRun: parsed?.dryRun ?? false,
       });
       logger.info(

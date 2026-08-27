@@ -5,6 +5,7 @@ import { AuthService } from '../../../src/contexts/auth/auth.service';
 import { LibsqlSessionStore } from '../../../src/contexts/auth/libsql-session-store';
 import { LibsqlUserStore } from '../../../src/contexts/auth/libsql-user-store';
 import { hashPassword } from '../../../src/contexts/auth/password-authenticator';
+import { BranchService } from '../../../src/contexts/versioning/branch.service';
 import { LibsqlRepoStore } from '../../../src/contexts/versioning/libsql-repo-store';
 import { RepoProvisioningService } from '../../../src/contexts/versioning/repo-provisioning.service';
 import { SyncPreferenceService } from '../../../src/contexts/versioning/sync-preference.service';
@@ -73,7 +74,23 @@ describe('versioning/versioning.router (integration, real HTTP requests via Hono
       },
     ]);
 
-    app = createVersioningRouter(authService, provisioningService, syncPreferenceService);
+    const branchService = new BranchService(repoStore, {
+      runDoltListBranches: mock(async () => [
+        { name: 'main', isCurrent: true },
+        { name: 'feature/demo', isCurrent: false },
+      ]),
+      runDoltCurrentBranch: mock(async () => 'main'),
+      runDoltCreateBranch: mock(async () => {}),
+      runDoltCheckoutBranch: mock(async () => {}),
+      runDoltDeleteBranch: mock(async () => {}),
+    });
+
+    app = createVersioningRouter(
+      authService,
+      provisioningService,
+      syncPreferenceService,
+      branchService,
+    );
   });
 
   async function loginAndGetAccessToken(): Promise<string> {
@@ -261,6 +278,91 @@ describe('versioning/versioning.router (integration, real HTTP requests via Hono
       expect(res.status).toBe(409);
       const body = await res.json();
       expect(body.error).toContain('FK dependencies');
+    });
+  });
+
+  describe('branch endpoints', () => {
+    it('lists branches for an authenticated user', async () => {
+      const token = await loginAndGetAccessToken();
+      await app.request('/repos', {
+        method: 'POST',
+        headers: { authorization: ['Bearer ', token].join(''), 'content-type': 'application/json' },
+        body: JSON.stringify({ repoId: 'demo-repo' }),
+      });
+
+      const res = await app.request('/repos/demo-repo/branches', {
+        headers: { authorization: ['Bearer ', token].join('') },
+      });
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.branches).toHaveLength(2);
+    });
+
+    it('creates a branch for an authenticated user', async () => {
+      const token = await loginAndGetAccessToken();
+      await app.request('/repos', {
+        method: 'POST',
+        headers: { authorization: ['Bearer ', token].join(''), 'content-type': 'application/json' },
+        body: JSON.stringify({ repoId: 'demo-repo' }),
+      });
+
+      const res = await app.request('/repos/demo-repo/branches', {
+        method: 'POST',
+        headers: { authorization: ['Bearer ', token].join(''), 'content-type': 'application/json' },
+        body: JSON.stringify({ name: 'feature/demo' }),
+      });
+
+      expect(res.status).toBe(201);
+    });
+
+    it('returns the current branch', async () => {
+      const token = await loginAndGetAccessToken();
+      await app.request('/repos', {
+        method: 'POST',
+        headers: { authorization: ['Bearer ', token].join(''), 'content-type': 'application/json' },
+        body: JSON.stringify({ repoId: 'demo-repo' }),
+      });
+
+      const res = await app.request('/repos/demo-repo/branches/current', {
+        headers: { authorization: ['Bearer ', token].join('') },
+      });
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.branch.name).toBe('main');
+    });
+
+    it('checks out a branch', async () => {
+      const token = await loginAndGetAccessToken();
+      await app.request('/repos', {
+        method: 'POST',
+        headers: { authorization: ['Bearer ', token].join(''), 'content-type': 'application/json' },
+        body: JSON.stringify({ repoId: 'demo-repo' }),
+      });
+
+      const res = await app.request('/repos/demo-repo/branches/feature%2Fdemo/checkout', {
+        method: 'POST',
+        headers: { authorization: ['Bearer ', token].join('') },
+      });
+
+      expect(res.status).toBe(200);
+    });
+
+    it('deletes a branch', async () => {
+      const token = await loginAndGetAccessToken();
+      await app.request('/repos', {
+        method: 'POST',
+        headers: { authorization: ['Bearer ', token].join(''), 'content-type': 'application/json' },
+        body: JSON.stringify({ repoId: 'demo-repo' }),
+      });
+
+      const res = await app.request('/repos/demo-repo/branches/feature%2Fdemo', {
+        method: 'DELETE',
+        headers: { authorization: ['Bearer ', token].join('') },
+      });
+
+      expect(res.status).toBe(204);
     });
   });
 });

@@ -44,3 +44,31 @@ export class SyncPreferenceConflictError extends Error {
     this.name = 'SyncPreferenceConflictError';
   }
 }
+
+export class InvalidBranchNameError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'InvalidBranchNameError';
+  }
+}
+
+export class BranchAlreadyExistsError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'BranchAlreadyExistsError';
+  }
+}
+
+export class BranchNotFoundError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'BranchNotFoundError';
+  }
+}
+
+export class ProtectedBranchError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ProtectedBranchError';
+  }
+}

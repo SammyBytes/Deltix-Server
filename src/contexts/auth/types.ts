@@ -29,9 +29,13 @@ export interface CreateUserInput {
   createdBy: string;
 }
 
+// Deliberately excludes `passwordHash` — this type is returned directly to
+// HTTP clients via GET /api/v1/auth/users, and a password hash (even a
+// salted argon2id one) must never be exposed over the network (OWASP ASVS
+// V2/credential exposure). See `AuthService.listUsers()`, which strips the
+// hash before returning this shape.
 export interface UserSummary {
   username: string;
-  passwordHash: string;
   createdAt: number;
   createdBy: string;
   active: boolean;

@@ -5,16 +5,28 @@
  * .github/copilot-instructions.md for the ACL boundary rule.
  */
 
+export { BranchService } from './branch.service';
 export type { PushCommitParams, RunDoltCommit } from './commit.service';
 export { CommitService } from './commit.service';
 export type { VersioningServices } from './create-versioning-services';
 export { createVersioningServices } from './create-versioning-services';
+export {
+  runDoltCheckoutBranch,
+  runDoltCreateBranch,
+  runDoltCurrentBranch,
+  runDoltDeleteBranch,
+  runDoltListBranches,
+} from './dolt-branch-cli';
 export { runDoltInit } from './dolt-cli';
 export { runDoltCommit } from './dolt-commit-cli';
 export { assertSafeTableName, readForeignKeyEdges } from './dolt-foreign-key-reader';
 export {
+  BranchAlreadyExistsError,
+  BranchNotFoundError,
   CommitFailedError,
+  InvalidBranchNameError,
   InvalidRepoIdError,
+  ProtectedBranchError,
   RepoAlreadyProvisionedError,
   RepoNotFoundError,
   RepoProvisioningFailedError,
@@ -34,5 +46,5 @@ export type {
   SyncPlan,
   SyncPlanRequest,
 } from './sync-preference-types';
-export type { RepoRecord, RepoSyncPreferenceSummary } from './types';
+export type { BranchSummary, RepoRecord, RepoSyncPreferenceSummary } from './types';
 export { createVersioningRouter } from './versioning.router';
