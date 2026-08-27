@@ -8,4 +8,8 @@ export type {
   AddonNasReader,
   AddonRouteHandler,
 } from './lifecycle';
-export { type AddonManifest, addonManifestSchema } from './manifest';
+export {
+  type AddonManifest,
+  addonManifestSchema,
+  RESERVED_OFFICIAL_NAME_PREFIXES,
+} from './manifest';

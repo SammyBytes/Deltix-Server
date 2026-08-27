@@ -1,7 +1,12 @@
 import { describe, expect, test } from 'bun:test';
 import { readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { ADDON_CAPABILITIES, addonManifestSchema, isAddonCapability } from '../src/index';
+import {
+  ADDON_CAPABILITIES,
+  addonManifestSchema,
+  isAddonCapability,
+  RESERVED_OFFICIAL_NAME_PREFIXES,
+} from '../src/index';
 
 describe('addon-sdk capabilities', () => {
   test('exposes exactly the 4 closed capabilities', () => {
@@ -56,6 +61,45 @@ describe('addonManifestSchema', () => {
     const { entrypoint: _entrypoint, ...withoutEntrypoint } = base;
     const result = addonManifestSchema.safeParse(withoutEntrypoint);
     expect(result.success).toBe(false);
+  });
+});
+
+describe('addonManifestSchema anti-impersonation naming rule', () => {
+  const base = {
+    version: '1.0.0',
+    entrypoint: 'index.js',
+    capabilities: ['http:route'] as const,
+  };
+
+  test('a community addon using a reserved official-looking prefix is rejected', () => {
+    for (const prefix of RESERVED_OFFICIAL_NAME_PREFIXES) {
+      const result = addonManifestSchema.safeParse({
+        ...base,
+        tier: 'community',
+        name: `${prefix}totally-legit`,
+        authorPublicKey: 'base64key',
+      });
+      expect(result.success).toBe(false);
+    }
+  });
+
+  test('an official addon may use a reserved prefix (it IS the official brand)', () => {
+    const result = addonManifestSchema.safeParse({
+      ...base,
+      tier: 'official',
+      name: 'deltix-metrics',
+    });
+    expect(result.success).toBe(true);
+  });
+
+  test('a community addon with a non-reserved name is accepted', () => {
+    const result = addonManifestSchema.safeParse({
+      ...base,
+      tier: 'community',
+      name: 'my-community-tool',
+      authorPublicKey: 'base64key',
+    });
+    expect(result.success).toBe(true);
   });
 });
 
