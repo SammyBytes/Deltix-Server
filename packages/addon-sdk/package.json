@@ -1,0 +1,15 @@
+{
+  "name": "@deltix/addon-sdk",
+  "version": "0.1.0",
+  "description": "MIT-licensed contract for building Deltix-Server addons: capabilities, manifest schema and lifecycle interfaces. Zero dependency on the BSL-licensed control plane core.",
+  "license": "MIT",
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "zod": "4.4.3"
+  }
+}

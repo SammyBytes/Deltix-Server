@@ -291,7 +291,34 @@ after N consecutive failures, that addon is disabled in memory for the remainder
 the process's lifetime (requires a server restart to re-enable — no live
 re-enable/admin toggle in Fase 4, kept deliberately simple).
 
-### 9.6 Explicit non-goals for Fase 4
+### 9.6 Naming & anti-impersonation (branding protection, not a security boundary)
+
+The signature + TOFU pipeline already prevents a community addon from being
+*cryptographically* accepted as official (it's checked against a different key and a
+different license-enforcement branch). But naming can still be used for **social
+engineering** — e.g. a community addon called `deltix-sso` sitting next to the real
+`deltix-sso` on an admin's filesystem, or simply looking official in logs/UI to end
+users who never inspect the manifest. Decision:
+
+- A closed list of **reserved name prefixes** (`deltix-`, `official-`) is hardcoded in
+  `@deltix/addon-sdk` (`RESERVED_OFFICIAL_NAME_PREFIXES`).
+- The manifest schema **rejects at parse time** (before signature/license checks even
+  run) any `tier: "community"` manifest whose `name` starts with a reserved prefix.
+  `tier: "official"` manifests may use them freely — that's the point of the brand.
+- This is enforced in the SDK schema (shared, can't be bypassed by a stale core
+  build) and re-validated implicitly every time `loadAddon()` parses the manifest —
+  no separate check needed in the loader.
+- This is a **naming/branding control, not a security boundary**: it stops accidental
+  or lazy impersonation and gives admins/end-users an unambiguous visual signal, but
+  it does not replace signature verification. A malicious actor could still name
+  their community addon anything *not* on the reserved list and it would still be
+  correctly identified as `community` tier everywhere (logs, admin UI, manifest
+  metadata) — the tier field itself, not the name, is the actual trust signal.
+- Beyond the reserved prefixes, **community addon names are otherwise free** — no
+  registry, no reservation system, no first-come-first-served claiming in Fase 4
+  (that's marketplace territory, explicitly out of scope — see §9.7).
+
+### 9.7 Explicit non-goals for Fase 4
 
 - No "Verified" community review/certification program (may be revisited once a
   real community of addon authors exists).
@@ -303,3 +330,6 @@ re-enable/admin toggle in Fase 4, kept deliberately simple).
   VM/container/subprocess isolation boundary — reassess if a real incident or
   enterprise requirement demands it).
 - No live re-enable of a circuit-broken addon without a server restart.
+- No community addon name registry/reservation beyond the reserved official prefixes
+  (name collisions across independent community authors are the operator's problem
+  to resolve by choosing which file path to trust, same as npm pre-scopes).

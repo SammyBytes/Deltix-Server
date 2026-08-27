@@ -5,11 +5,17 @@
  */
 import { generateKeyPairSync, sign } from 'node:crypto';
 
+export interface TestLicenseAddonsConfig {
+  official: string[];
+  communityAddonsEnabled: boolean;
+  maxCommunityAddons: number | null;
+}
+
 export interface TestLicensePayload {
   licensee: string;
   tier: 'community' | 'enterprise';
   seats: number;
-  addons: string[];
+  addons?: TestLicenseAddonsConfig;
   issuedAt: string;
   expiresAt?: string;
   nonce: string;
@@ -40,7 +46,7 @@ export function buildDefaultPayload(
     licensee: 'Acme Corp',
     tier: 'enterprise',
     seats: 10,
-    addons: ['auth-ldap'],
+    addons: { official: ['auth-ldap'], communityAddonsEnabled: true, maxCommunityAddons: null },
     issuedAt: new Date('2026-01-01T00:00:00.000Z').toISOString(),
     nonce: 'test-nonce-1',
     ...overrides,

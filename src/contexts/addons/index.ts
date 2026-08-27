@@ -1,13 +1,32 @@
 /**
- * Placeholder for the "addons" bounded context.
+ * Public API of the "addons" bounded context (Fase 4: Dynamic Add-on
+ * Loading). This is the ONLY module other contexts are allowed to import
+ * from — see .github/copilot-instructions.md for the ACL boundary rule.
  *
- * This is the ONLY file other contexts/modules are allowed to import from
- * (ACL boundary). Internals of this context must never be imported directly
- * from outside (e.g. `contexts/addons/some-internal-file`).
- *
- * Implementation lands in Fase 4 of the roadmap (dynamic Add-on loading via
- * `import()`, gated by the active license — see `contexts/licensing`).
- * See README.md at the repo root and .github/copilot-instructions.md for
- * architecture rules.
+ * Implements the fail-closed pipeline from
+ * docs/decisions/0001-addon-licensing-and-business-model.md:
+ * manifest validation -> closed-capability check -> signature verification
+ * (official: Deltix key: community: TOFU trust store) -> license payload
+ * check -> `import()`, plus a runtime error-boundary/circuit-breaker for
+ * addon-registered routes.
  */
-export {};
+export { AddonCircuitBreaker, type AddonCircuitBreakerOptions } from './addon-circuit-breaker';
+export { type AddonDiscoveryResult, discoverAndLoadAddons } from './addon-discovery';
+export {
+  type AddonLoadDeps,
+  assertWithinCommunityAddonLimit,
+  type LoadedAddon,
+  loadAddon,
+} from './addon-loader';
+export type { AddonTrustStore } from './addon-trust-store';
+export { createAddonsRouter } from './addons.router';
+export { createAddonTrustStore } from './create-addon-trust-store';
+export {
+  AddonCapabilityDeniedError,
+  AddonLicenseDeniedError,
+  AddonLimitExceededError,
+  AddonManifestInvalidError,
+  AddonNotTrustedError,
+  AddonSignatureInvalidError,
+} from './errors';
+export type { AddonTrustRecord } from './types';

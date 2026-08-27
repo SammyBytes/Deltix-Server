@@ -25,3 +25,4 @@ dist/
 .vscode/*
 !.vscode/extensions.json
 certs/
+addon-author-keys/
