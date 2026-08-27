@@ -116,6 +116,16 @@ const envSchema = z.object({
     ),
   DELTIX_STAGING_ROOT_PATH: z.string().default('./data/staging'),
 
+  // Addon system (Fase 4): TOFU trust store for community addon author
+  // keys, plus local-filesystem-only addon discovery paths (comma
+  // separated). See docs/decisions/0001-addon-licensing-and-business-model.md.
+  DELTIX_ADDON_TRUST_DB_PATH: z.string().default('./data/addon-trust.db'),
+  DELTIX_ADDON_PATHS: z.string().default(''),
+  /** Official addon names that are always free (never gated by the license payload). */
+  DELTIX_ADDON_FREE_OFFICIAL: z.string().default(''),
+  /** Consecutive runtime failures before an addon route is disabled in-memory until restart. */
+  DELTIX_ADDON_MAX_CONSECUTIVE_FAILURES: z.coerce.number().int().positive().default(5),
+
   // Reserved for future phases
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
 });

@@ -12,9 +12,10 @@ export {
   LicenseMalformedError,
   LicenseSignatureInvalidError,
 } from './errors';
+export { parseLicenseKey, resolveLicenseAddonsConfig } from './license-parser';
 export {
   createLicenseValidator,
   type LicenseValidatorDeps,
   LicenseValidatorService,
 } from './license-validator.service';
-export type { LicensePayload, LicenseValidationResult } from './types';
+export type { LicenseAddonsConfig, LicensePayload, LicenseValidationResult } from './types';

@@ -9,9 +9,14 @@
  */
 
 import { Hono } from 'hono';
+import {
+  AddonCircuitBreaker,
+  createAddonTrustStore,
+  discoverAndLoadAddons,
+} from './contexts/addons';
 import { createAdminUiRouter } from './contexts/admin-ui';
 import { createAuthRouter, createAuthService } from './contexts/auth';
-import { createLicenseValidator } from './contexts/licensing';
+import { createLicenseValidator, resolveLicenseAddonsConfig } from './contexts/licensing';
 import {
   createNasSyncService,
   createStorageRouter,
@@ -81,8 +86,57 @@ async function main(): Promise<void> {
     { port: grpcEngine.port },
     'gRPC transfer engine listening (TLS, Push/Pull/Heartbeat)',
   );
-  // Add-on loading (Fase 4) lands later; REST ticket issuance, gRPC
-  // transfer, and staging/NAS sync are all live now.
+
+  // Add-on loading (Fase 4): fail-closed pipeline — manifest -> closed
+  // capability list -> signature (official: Deltix key, community: TOFU) ->
+  // license enforcement -> import(). One bad addon never aborts the others
+  // or the control plane boot; see docs/decisions/0001-*.md.
+  const addonsConfig = resolveLicenseAddonsConfig(result.license);
+  const addonTrustStore = await createAddonTrustStore(env);
+  const addonCircuitBreaker = new AddonCircuitBreaker({
+    maxConsecutiveFailures: env.DELTIX_ADDON_MAX_CONSECUTIVE_FAILURES,
+    onDisabled: (addonName) => {
+      logger.error({ addonName }, 'Addon disabled after repeated runtime failures (until restart)');
+    },
+  });
+  const { loaded: loadedAddons, failures: addonFailures } = await discoverAndLoadAddons(
+    env.DELTIX_ADDON_PATHS,
+    {
+      officialPublicKey: env.DELTIX_LICENSE_PUBLIC_KEY,
+      trustStore: addonTrustStore,
+      addonsConfig,
+      freeOfficialAddons: env.DELTIX_ADDON_FREE_OFFICIAL.split(',')
+        .map((name) => name.trim())
+        .filter((name) => name.length > 0),
+      buildContext: (addonName, grantedCapabilities) => ({ addonName, grantedCapabilities }),
+    },
+  );
+  for (const failure of addonFailures) {
+    logger.error(
+      { addonDir: failure.addonDir, err: failure.error },
+      'Addon failed to load, skipping (control plane boot continues)',
+    );
+  }
+  for (const addon of loadedAddons) {
+    const grantedHttpRoute = addon.manifest.capabilities.includes('http:route');
+    if (grantedHttpRoute && typeof addon.module.activate === 'function') {
+      await addon.module.activate({
+        addonName: addon.manifest.name,
+        grantedCapabilities: addon.manifest.capabilities,
+        http: {
+          register: (path, handler) => {
+            app.all(path, async (c) =>
+              addonCircuitBreaker.wrap(addon.manifest.name, handler)(c.req.raw),
+            );
+          },
+        },
+      });
+    }
+  }
+  logger.info(
+    { loaded: loadedAddons.length, failed: addonFailures.length },
+    'Add-on loading complete',
+  );
 }
 
 if (import.meta.main) {

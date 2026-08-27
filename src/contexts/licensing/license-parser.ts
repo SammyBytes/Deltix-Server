@@ -9,7 +9,7 @@
  * shape validation can fail fast and cheaply before any crypto is attempted.
  */
 import { LicenseMalformedError } from './errors';
-import type { LicensePayload } from './types';
+import type { LicenseAddonsConfig, LicensePayload } from './types';
 
 export interface ParsedLicenseKey {
   payloadBytes: Uint8Array;
@@ -44,6 +44,24 @@ export function parseLicenseKey(licenseKey: string): ParsedLicenseKey {
 
   const payload = assertIsLicensePayload(parsedJson);
   return { payloadBytes, payload, signature };
+}
+
+/**
+ * Resolves the effective addon rules for a license, applying ADR 0001's
+ * tier-based fail-closed defaults when the payload omits `addons` entirely
+ * (e.g. licenses issued before Fase 4). Community tier defaults to a
+ * generous-but-bounded community addon allowance; Enterprise defaults to
+ * unlimited community addons. Both fail closed on official paid addons
+ * (empty list) when unspecified.
+ */
+export function resolveLicenseAddonsConfig(payload: LicensePayload): LicenseAddonsConfig {
+  if (payload.addons) {
+    return payload.addons;
+  }
+  if (payload.tier === 'community') {
+    return { official: [], communityAddonsEnabled: true, maxCommunityAddons: 10 };
+  }
+  return { official: [], communityAddonsEnabled: true, maxCommunityAddons: null };
 }
 
 function assertIsLicensePayload(value: unknown): LicensePayload {
@@ -82,8 +100,37 @@ function assertSeats(v: Record<string, unknown>): void {
 }
 
 function assertAddons(v: Record<string, unknown>): void {
-  if (!Array.isArray(v.addons) || !v.addons.every((addon) => typeof addon === 'string')) {
-    throw new LicenseMalformedError('License payload "addons" must be an array of strings');
+  if (v.addons === undefined) {
+    return;
+  }
+  if (typeof v.addons !== 'object' || v.addons === null || Array.isArray(v.addons)) {
+    throw new LicenseMalformedError('License payload "addons" must be an object when present');
+  }
+  const addons = v.addons as Record<string, unknown>;
+
+  if (
+    !Array.isArray(addons.official) ||
+    !addons.official.every((name) => typeof name === 'string')
+  ) {
+    throw new LicenseMalformedError(
+      'License payload "addons.official" must be an array of strings',
+    );
+  }
+  if (typeof addons.communityAddonsEnabled !== 'boolean') {
+    throw new LicenseMalformedError(
+      'License payload "addons.communityAddonsEnabled" must be a boolean',
+    );
+  }
+  const maxCommunityAddons = addons.maxCommunityAddons;
+  const isValidMax =
+    maxCommunityAddons === null ||
+    (typeof maxCommunityAddons === 'number' &&
+      Number.isFinite(maxCommunityAddons) &&
+      maxCommunityAddons >= 0);
+  if (!isValidMax) {
+    throw new LicenseMalformedError(
+      'License payload "addons.maxCommunityAddons" must be a non-negative number or null',
+    );
   }
 }
 
