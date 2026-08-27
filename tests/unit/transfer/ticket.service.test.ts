@@ -112,7 +112,10 @@ describe('TicketService', () => {
     it('activates a matching, unexpired, unconsumed ticket', async () => {
       const ticket = await service.issueTicket('alice', 'push', 'org/repo');
 
-      await expect(service.consumeTicket(ticket.id, 'push', 'org/repo')).resolves.toBeUndefined();
+      await expect(service.consumeTicket(ticket.id, 'push', 'org/repo')).resolves.toMatchObject({
+        id: ticket.id,
+        username: 'alice',
+      });
 
       const stored = await store.get(ticket.id);
       expect(stored?.status).toBe('active');

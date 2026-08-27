@@ -3,7 +3,7 @@
  * `repoId` and persists the repoId <-> Dolt-path mapping via `RepoStore`.
  *
  * `runDoltInit` is injected (defaults to the real `dolt init` CLI
- * invocation via `Bun.$`, see `create-repo-provisioning-service.ts`) so
+ * invocation via `Bun.$`, see `create-versioning-services.ts`) so
  * this service is fully unit-testable without a real Dolt binary — mirrors
  * the same DI convention as `NasSyncService`'s injectable `now`.
  */

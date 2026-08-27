@@ -39,10 +39,25 @@ export interface PushSessionResult {
   bytesReceived: number;
 }
 
+/**
+ * Fase 5.2 hook: invoked (best-effort, never blocking the transfer's own
+ * success) right after a push session finishes staging, so the caller can
+ * record a real Dolt commit for `repo` attributed to `username`. Injected
+ * so `storage` never imports `versioning` directly (ACL boundary) — the
+ * composition root (`src/index.ts`) wires the real implementation.
+ */
+export type OnPushCommitted = (params: {
+  repo: string;
+  username: string;
+  jobId: string;
+  checksum: string;
+}) => Promise<void>;
+
 export class PushSessionHandler {
   private hash = createHash('sha256');
   private bytesReceived = 0;
   private ticketId: string | undefined;
+  private username: string | undefined;
   private repo: string | undefined;
   private stagingFilePath: string | undefined;
   private fileSink: Bun.FileSink | undefined;
@@ -54,6 +69,7 @@ export class PushSessionHandler {
     private readonly stagingRootPath: string,
     private readonly maxRetries: number,
     private readonly now: () => number = () => Date.now(),
+    private readonly onPushCommitted: OnPushCommitted = async () => {},
   ) {}
 
   /**
@@ -69,7 +85,8 @@ export class PushSessionHandler {
       throw new PushSessionAbortedError('Header already received for this session');
     }
     try {
-      await this.ticketService.consumeTicket(ticketId, operation, repo);
+      const ticket = await this.ticketService.consumeTicket(ticketId, operation, repo);
+      this.username = ticket.username;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       throw new PushSessionAbortedError(`ticket rejected: ${message}`);
@@ -150,6 +167,24 @@ export class PushSessionHandler {
       // safely staged); a failure to explicitly close it is not fatal to
       // the transfer, it will simply expire on its own sliding window.
     });
+
+    // Fase 5.2: best-effort real Dolt commit. A failure here must NEVER
+    // fail the push response — the bytes are already safely staged and
+    // will still reach the NAS via the independent sync pipeline; losing
+    // a version-history commit is recoverable (repo simply lags one
+    // commit until the next successful push), losing staged data is not.
+    if (this.username) {
+      await this.onPushCommitted({
+        repo: this.repo,
+        username: this.username,
+        jobId,
+        checksum,
+      }).catch(() => {
+        // Logged by the injected implementation itself; intentionally
+        // swallowed here so a versioning-side failure never surfaces as a
+        // push failure to the client.
+      });
+    }
 
     return { jobId, checksum, bytesReceived: this.bytesReceived };
   }

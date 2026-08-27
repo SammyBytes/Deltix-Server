@@ -30,3 +30,10 @@ export class InvalidRepoIdError extends Error {
     this.name = 'InvalidRepoIdError';
   }
 }
+
+export class CommitFailedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'CommitFailedError';
+  }
+}

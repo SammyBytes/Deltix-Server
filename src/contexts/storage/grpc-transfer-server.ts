@@ -29,7 +29,11 @@ import {
   PullSessionAbortedError,
   PullSessionHandler,
 } from './pull-session-handler';
-import { PushSessionAbortedError, PushSessionHandler } from './push-session-handler';
+import {
+  type OnPushCommitted,
+  PushSessionAbortedError,
+  PushSessionHandler,
+} from './push-session-handler';
 import type { TransferJobStore } from './transfer-job-store';
 
 const PROTO_PATH = join(import.meta.dir, '..', '..', '..', 'proto', 'transfer.proto');
@@ -46,6 +50,7 @@ export interface GrpcTransferServerOptions {
   nasRootPath: string;
   maxRetries: number;
   tls: GrpcTlsConfig;
+  onPushCommitted?: OnPushCommitted;
 }
 
 function loadTransferEngineDefinition() {
@@ -77,6 +82,8 @@ export function createGrpcTransferServer(options: GrpcTransferServerOptions): gr
         options.jobStore,
         options.stagingRootPath,
         options.maxRetries,
+        undefined,
+        options.onPushCommitted,
       );
       let headerReceived = false;
       let aborted = false;

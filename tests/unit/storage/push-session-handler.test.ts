@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'bun:test';
+import { beforeEach, describe, expect, it, mock } from 'bun:test';
 import { mkdtemp, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -162,6 +162,52 @@ describe('PushSessionHandler', () => {
 
     const onDisk = await readFile(job?.stagingPath ?? '', 'utf8');
     expect(onDisk).toBe('data');
+  });
+
+  it('invokes onPushCommitted with repo/username/jobId/checksum after a successful finish', async () => {
+    const ticket = await issueTicket('push', 'org/repo');
+    const calls: Array<{ repo: string; username: string; jobId: string; checksum: string }> = [];
+    const onPushCommitted = mock(async (params: (typeof calls)[number]) => {
+      calls.push(params);
+    });
+    const handler = new PushSessionHandler(
+      ticketService,
+      jobStore,
+      stagingRoot,
+      5,
+      () => 1000,
+      onPushCommitted,
+    );
+    await handler.onHeader(ticket.id, 'push', 'org/repo');
+    handler.onChunk(new TextEncoder().encode('data'));
+    const result = await handler.finish();
+
+    expect(onPushCommitted).toHaveBeenCalledTimes(1);
+    expect(calls[0]).toEqual({
+      repo: 'org/repo',
+      username: ticket.username,
+      jobId: result.jobId,
+      checksum: result.checksum,
+    });
+  });
+
+  it('a rejected onPushCommitted does not fail the push (data is already safely staged)', async () => {
+    const ticket = await issueTicket('push', 'org/repo');
+    const onPushCommitted = mock(async () => {
+      throw new Error('dolt commit exploded');
+    });
+    const handler = new PushSessionHandler(
+      ticketService,
+      jobStore,
+      stagingRoot,
+      5,
+      () => 1000,
+      onPushCommitted,
+    );
+    await handler.onHeader(ticket.id, 'push', 'org/repo');
+    handler.onChunk(new TextEncoder().encode('data'));
+
+    await expect(handler.finish()).resolves.toMatchObject({ checksum: expect.any(String) });
   });
 
   it('closes the ticket on finish so it cannot be reused', async () => {

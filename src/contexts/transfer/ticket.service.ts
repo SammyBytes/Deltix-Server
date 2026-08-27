@@ -53,12 +53,27 @@ export class TicketService {
    * error message after the atomic activate() attempt already failed —
    * this read never influences the transition decision itself, so it adds
    * no race window.
+   *
+   * Returns the consumed `Ticket` (carrying `username`) so callers (Fase
+   * 5.2: `PushSessionHandler`) can attribute a resulting Dolt commit to
+   * the authenticated user who requested the transfer, without a second
+   * round-trip to the store.
    */
-  async consumeTicket(ticketId: string, operation: TransferOperation, repo: string): Promise<void> {
+  async consumeTicket(
+    ticketId: string,
+    operation: TransferOperation,
+    repo: string,
+  ): Promise<Ticket> {
     const now = this.now();
     const activated = await this.store.activate(ticketId, operation, repo, now);
     if (activated) {
-      return;
+      const ticket = await this.store.get(ticketId);
+      // Practically unreachable (we just activated it), but keeps the
+      // return type honest without a non-null assertion.
+      if (!ticket) {
+        throw new TicketNotFoundError();
+      }
+      return ticket;
     }
 
     const ticket = await this.store.get(ticketId);

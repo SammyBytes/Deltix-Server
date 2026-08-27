@@ -4,9 +4,15 @@
  * contexts/modules are allowed to import from — see
  * .github/copilot-instructions.md for the ACL boundary rule.
  */
-export { createRepoProvisioningService } from './create-repo-provisioning-service';
+
+export type { PushCommitParams, RunDoltCommit } from './commit.service';
+export { CommitService } from './commit.service';
+export type { VersioningServices } from './create-versioning-services';
+export { createVersioningServices } from './create-versioning-services';
 export { runDoltInit } from './dolt-cli';
+export { runDoltCommit } from './dolt-commit-cli';
 export {
+  CommitFailedError,
   InvalidRepoIdError,
   RepoAlreadyProvisionedError,
   RepoNotFoundError,

@@ -25,7 +25,7 @@ import {
   startGrpcTransferEngine,
 } from './contexts/storage';
 import { createTicketService, createTransferRouter } from './contexts/transfer';
-import { createRepoProvisioningService, createVersioningRouter } from './contexts/versioning';
+import { createVersioningRouter, createVersioningServices } from './contexts/versioning';
 import { loadEnv } from './shared/env';
 import { createLogger } from './shared/logger';
 import { applySecurityMiddleware } from './shared/security-middleware';
@@ -48,7 +48,7 @@ async function main(): Promise<void> {
   const ticketService = await createTicketService(env);
   const nasSyncService = await createNasSyncService(env);
   const addonTrustStore = await createAddonTrustStore(env);
-  const repoProvisioningService = await createRepoProvisioningService(env);
+  const { repoProvisioningService, commitService } = await createVersioningServices(env);
   const secureCookies = env.NODE_ENV === 'production';
   const authRouter = createAuthRouter(authService, secureCookies);
   const transferRouter = createTransferRouter(authService, ticketService);
@@ -89,7 +89,16 @@ async function main(): Promise<void> {
   // protocol. Shares the same TransferJob store (libSQL file) as the NAS
   // sync worker above — Push writes 'staged' rows, the worker picks them
   // up and promotes them to the NAS pipeline.
-  const grpcEngine = await startGrpcTransferEngine(env, ticketService);
+  const grpcEngine = await startGrpcTransferEngine(
+    env,
+    ticketService,
+    async ({ repo, username, jobId, checksum }) => {
+      const commitHash = await commitService.recordPush({ repo, username, jobId, checksum });
+      if (commitHash) {
+        logger.info({ repo, username, jobId, commitHash }, 'Recorded real Dolt commit for push');
+      }
+    },
+  );
   logger.info(
     { port: grpcEngine.port },
     'gRPC transfer engine listening (TLS, Push/Pull/Heartbeat)',

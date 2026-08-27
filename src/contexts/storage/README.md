@@ -53,6 +53,25 @@ exponential backoff (`DELTIX_NAS_SYNC_BACKOFF_BASE_MS`, capped at
 /api/v1/storage/transfer-jobs/dead-letter/retry` (manual requeue), both
 JWT-protected, ready to back a future Admin Web UI panel.
 
+## Real Dolt commits on push (Fase 5.2)
+
+`PushSessionHandler.finish()` accepts an injectable `OnPushCommitted` hook
+(default no-op), invoked best-effort right after the `TransferJob` row is
+created. `src/index.ts` wires this to `contexts/versioning`'s
+`CommitService.recordPush()`, which records a real, additional `dolt
+commit` — attributed to the pushing user — inside the repo's own Dolt
+history, IF that `repo` was previously provisioned via `POST
+/api/v1/versioning/repos` (Fase 5.1). Pushing to a `repo` with no
+provisioned Dolt backend is still legal and simply produces no commit
+(backward-compatible with the Fase 3/4 NAS-sim-only flow).
+
+This hook is injected rather than imported directly so `storage` never
+imports `versioning` (ACL boundary) — see `.github/copilot-instructions.md`.
+A failure inside the hook is always swallowed here: the pushed bytes are
+already safely staged and will still reach the NAS via the independent
+sync pipeline above; losing one version-history commit is recoverable,
+losing staged data is not.
+
 ## Not yet implemented
 
 - Wiring `NasSyncWorker`'s failure callback to an actual alerting/

@@ -1,6 +1,6 @@
 /**
  * Real `dolt init` invocation, used by the composition root
- * (`create-repo-provisioning-service.ts`) as the `RunDoltInit` dependency.
+ * (`create-versioning-services.ts`) as the `RunDoltInit` dependency.
  * Dolt is consumed strictly as a black-box binary here — same convention
  * as `contexts/licensing/dolt-commit-log.reader.ts`. All arguments are
  * passed through Bun's shell templating (`Bun.$`), which quotes each
