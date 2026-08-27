@@ -33,10 +33,28 @@ const sessionTokenBodySchema = z.object({
   refreshToken: z.string().min(1).optional(),
 });
 
+/**
+ * Browsers silently drop `Secure` cookies set over a plain-HTTP response, so
+ * blindly setting `secure: true` based on NODE_ENV=production breaks session
+ * persistence for the (very common) deployment shape where the control plane
+ * is exposed directly over HTTP on an internal/air-gapped network with no
+ * TLS-terminating reverse proxy in front of it. Only mark the cookie Secure
+ * when this specific request actually arrived over TLS -- either terminated
+ * here (rare, Bun.serve has no TLS in this app) or forwarded by a reverse
+ * proxy that sets `x-forwarded-proto: https`.
+ */
+function isRequestHttps(c: Context): boolean {
+  const forwardedProto = c.req.header('x-forwarded-proto');
+  if (forwardedProto) {
+    return forwardedProto.split(',')[0]?.trim().toLowerCase() === 'https';
+  }
+  return new URL(c.req.url).protocol === 'https:';
+}
+
 function setRefreshTokenCookie(c: Context, token: string, secure: boolean) {
   setCookie(c, REFRESH_TOKEN_COOKIE, token, {
     httpOnly: true,
-    secure,
+    secure: secure && isRequestHttps(c),
     sameSite: 'Strict',
     path: '/',
   });

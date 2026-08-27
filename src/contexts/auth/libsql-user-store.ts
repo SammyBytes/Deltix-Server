@@ -16,7 +16,7 @@ function rowToUser(row: Record<string, unknown>): UserRecord {
         ? null
         : Number(row.last_login_at),
     // Older rows created before this column existed default to non-admin —
-    // see the ALTER TABLE migration below and `backfillFirstGlobalAdmin()`
+    // see the ALTER TABLE migration below and `ensureBootstrapAdmin()`
     // in AuthService, which promotes an existing sole user rather than
     // leaving every pre-existing installation locked out of its own panel.
     isGlobalAdmin: Number(row.is_global_admin ?? 0) === 1,

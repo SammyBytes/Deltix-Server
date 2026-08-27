@@ -277,6 +277,35 @@ describe('versioning/versioning.router (integration, real HTTP requests via Hono
       expect(body.repos).toHaveLength(1);
       expect(body.repos[0]?.role).toBe('admin');
     });
+
+    it('lets a global admin see repos they hold no explicit per-repo role on', async () => {
+      await authService.setGlobalAdmin('bob', true);
+      await provisionRepoAsAlice('demo-repo');
+      const bobToken = await loginAndGetAccessToken('bob', 'another-pass');
+
+      const res = await app.request('/repos', {
+        headers: { authorization: ['Bearer ', bobToken].join('') },
+      });
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { repos: Array<{ repoId: string; role: string | null }> };
+      expect(body.repos).toHaveLength(1);
+      expect(body.repos[0]?.repoId).toBe('demo-repo');
+      expect(body.repos[0]?.role).toBeNull();
+    });
+
+    it('does not show repos to a non-admin user with no per-repo role', async () => {
+      await provisionRepoAsAlice('demo-repo');
+      const bobToken = await loginAndGetAccessToken('bob', 'another-pass');
+
+      const res = await app.request('/repos', {
+        headers: { authorization: ['Bearer ', bobToken].join('') },
+      });
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { repos: Array<{ repoId: string }> };
+      expect(body.repos).toHaveLength(0);
+    });
   });
 
   describe('GET /repos/:repoId', () => {
@@ -608,6 +637,33 @@ describe('versioning/versioning.router (integration, real HTTP requests via Hono
       });
 
       expect(denied.status).toBe(403);
+    });
+
+    it('lets a global admin grant/list/revoke roles on a repo they hold no explicit role on', async () => {
+      await provisionRepoAsAlice('global-admin-managed-repo');
+      await authService.setGlobalAdmin('bob', true);
+      const bobToken = await loginAndGetAccessToken('bob', 'another-pass');
+
+      const listRes = await app.request('/repos/global-admin-managed-repo/roles', {
+        headers: { authorization: ['Bearer ', bobToken].join('') },
+      });
+      expect(listRes.status).toBe(200);
+
+      const grantRes = await app.request('/repos/global-admin-managed-repo/roles', {
+        method: 'POST',
+        headers: {
+          authorization: ['Bearer ', bobToken].join(''),
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({ username: 'bob', role: 'reader' }),
+      });
+      expect(grantRes.status).toBe(201);
+
+      const revokeRes = await app.request('/repos/global-admin-managed-repo/roles/bob', {
+        method: 'DELETE',
+        headers: { authorization: ['Bearer ', bobToken].join('') },
+      });
+      expect(revokeRes.status).toBe(204);
     });
 
     it('applies reader/writer/admin permissions across existing endpoints', async () => {

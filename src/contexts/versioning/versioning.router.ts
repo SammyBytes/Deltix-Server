@@ -112,6 +112,42 @@ async function requireRepoRole(
   return { username, role };
 }
 
+/**
+ * Same as requireRepoRole, but global admins are also let through even with
+ * no explicit per-repo role of their own. Scoped ONLY to the role-management
+ * endpoints below (list/grant/revoke) -- global admin must NOT become an
+ * implicit reader/writer/admin for actual repo data operations (push, merge,
+ * commit, etc.), that would silently reintroduce the RBAC-bypass class of
+ * bug already fixed elsewhere. Managing *who else* has access is a distinct,
+ * legitimately global-admin-level responsibility.
+ */
+async function requireRepoRoleOrGlobalAdmin(
+  c: Context,
+  authService: AuthService,
+  repoId: string,
+  minimumRole: RepoRole,
+) {
+  const username = await requireUsername(c, authService);
+  if (typeof username !== 'string') {
+    return username;
+  }
+  const role = await authService.getRepoRole(username, repoId);
+  if (role && ROLE_RANK[role] >= ROLE_RANK[minimumRole]) {
+    return { username, role };
+  }
+  if (await authService.isGlobalAdmin(username)) {
+    return { username, role: role ?? 'admin' };
+  }
+  return c.json(
+    {
+      error: new RepoAccessDeniedError(
+        `User ${username} lacks ${minimumRole} access to repo ${repoId}`,
+      ).message,
+    },
+    403,
+  );
+}
+
 async function authorizeRepoRequest(c: Context, authService: AuthService, minimumRole: RepoRole) {
   const repoId = c.req.param('repoId');
   if (!repoId) {
@@ -281,11 +317,16 @@ export function createVersioningRouter(
     }
 
     const repos = await provisioningService.list();
+    const isGlobalAdmin = await authService.isGlobalAdmin(username);
     const visible = [];
     for (const repo of repos) {
       const role = await authService.getRepoRole(username, repo.repoId);
-      if (role) {
-        visible.push({ ...repo, role });
+      // Global admins can see every repo (even ones they hold no explicit
+      // per-repo role on) so they can actually manage roles for other users --
+      // that's the whole point of the admin Roles panel. Global admin status
+      // is intentionally NOT an implicit reader/writer/admin repo role.
+      if (role || isGlobalAdmin) {
+        visible.push({ ...repo, role: role ?? null });
       }
     }
     return c.json({ repos: visible }, 200);
@@ -305,7 +346,12 @@ export function createVersioningRouter(
   });
 
   app.get('/repos/:repoId/roles', async (c) => {
-    const access = await requireRepoRole(c, authService, c.req.param('repoId'), 'reader');
+    const access = await requireRepoRoleOrGlobalAdmin(
+      c,
+      authService,
+      c.req.param('repoId'),
+      'reader',
+    );
     if (!('username' in access)) {
       return access;
     }
@@ -314,7 +360,12 @@ export function createVersioningRouter(
   });
 
   app.post('/repos/:repoId/roles', async (c) => {
-    const access = await requireRepoRole(c, authService, c.req.param('repoId'), 'admin');
+    const access = await requireRepoRoleOrGlobalAdmin(
+      c,
+      authService,
+      c.req.param('repoId'),
+      'admin',
+    );
     if (!('username' in access)) {
       return access;
     }
@@ -342,7 +393,12 @@ export function createVersioningRouter(
   });
 
   app.delete('/repos/:repoId/roles/:username', async (c) => {
-    const access = await requireRepoRole(c, authService, c.req.param('repoId'), 'admin');
+    const access = await requireRepoRoleOrGlobalAdmin(
+      c,
+      authService,
+      c.req.param('repoId'),
+      'admin',
+    );
     if (!('username' in access)) {
       return access;
     }

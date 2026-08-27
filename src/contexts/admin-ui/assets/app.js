@@ -53,6 +53,20 @@ function clearInlineMessage(element) {
   element.classList.add('hidden');
 }
 
+/**
+ * Distinguish "genuinely empty" from "failed to load" in table bodies. Silent
+ * failures (401/403/network error) used to render the exact same empty-state
+ * text as a truly empty list, which made session/permission bugs look like
+ * data-loss bugs. Always show this on a load failure instead.
+ */
+function renderTableLoadError(tbody, colspan, label) {
+  if (!tbody) return;
+  tbody.innerHTML =
+    '<tr><td colspan="' + colspan + '" class="px-3 py-4 text-center text-red-400">' +
+    'Failed to load ' + label + ' — your session may have expired. Try refreshing the page.' +
+    '</td></tr>';
+}
+
 function authHeaders() {
   return accessToken ? { authorization: 'Bearer ' + accessToken } : {};
 }
@@ -153,10 +167,15 @@ async function loadTrustedAddons() {
   if (!trustList || !accessToken) return;
   try {
     const res = await fetch('/api/v1/addons/trust', { headers: authHeaders() });
-    if (!res.ok) return;
+    if (!res.ok) {
+      renderTableLoadError(trustList, 5, 'trusted addons');
+      return;
+    }
     const data = await res.json();
     renderTrustedAddons(data.trusted || []);
-  } catch {}
+  } catch {
+    renderTableLoadError(trustList, 5, 'trusted addons');
+  }
 }
 
 function renderTrustedAddons(trusted) {
@@ -240,10 +259,15 @@ async function loadUsers() {
   if (!userList || !accessToken) return;
   try {
     const res = await fetch('/api/v1/auth/users', { headers: authHeaders() });
-    if (!res.ok) return;
+    if (!res.ok) {
+      renderTableLoadError(userList, 7, 'users');
+      return;
+    }
     const data = await res.json();
     renderUsers(data.users || []);
-  } catch {}
+  } catch {
+    renderTableLoadError(userList, 7, 'users');
+  }
 }
 
 function renderUsers(users) {
@@ -514,7 +538,10 @@ async function loadReposForRoles() {
   if (!rolesRepoSelect || !accessToken) return;
   try {
     const res = await fetch('/api/v1/versioning/repos', { headers: authHeaders() });
-    if (!res.ok) return;
+    if (!res.ok) {
+      rolesRepoSelect.innerHTML = '<option value="">Failed to load repositories — refresh the page</option>';
+      return;
+    }
     const data = await res.json();
     const repos = data.repos || [];
     const previouslySelected = rolesRepoSelect.value;
@@ -528,7 +555,9 @@ async function loadReposForRoles() {
     if (previouslySelected && repos.some((repo) => repo.repoId === previouslySelected)) {
       rolesRepoSelect.value = previouslySelected;
     }
-  } catch {}
+  } catch {
+    rolesRepoSelect.innerHTML = '<option value="">Failed to load repositories — refresh the page</option>';
+  }
 }
 
 async function loadRepoRoles(repoId) {
@@ -542,13 +571,13 @@ async function loadRepoRoles(repoId) {
       headers: authHeaders(),
     });
     if (!res.ok) {
-      renderRepoRoles([]);
+      renderTableLoadError(rolesList, 5, 'repo roles');
       return;
     }
     const data = await res.json();
     renderRepoRoles(data.roles || []);
   } catch {
-    renderRepoRoles([]);
+    renderTableLoadError(rolesList, 5, 'repo roles');
   }
 }
 

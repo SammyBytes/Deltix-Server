@@ -20,6 +20,7 @@ function generateTestEd25519KeyPairPem() {
 describe('auth/auth.router (integration, real HTTP requests via Hono.fetch)', () => {
   let tempDir: string;
   let app: ReturnType<typeof createAuthRouter>;
+  let service: AuthService;
 
   beforeEach(async () => {
     tempDir = await mkdtemp(join(tmpdir(), 'deltix-auth-router-test-'));
@@ -41,7 +42,7 @@ describe('auth/auth.router (integration, real HTTP requests via Hono.fetch)', ()
       isGlobalAdmin: false,
     });
 
-    const service = new AuthService(
+    service = new AuthService(
       {
         jwtPrivateKeyPem: privateKeyPem,
         jwtPublicKeyPem: publicKeyPem,
@@ -82,6 +83,34 @@ describe('auth/auth.router (integration, real HTTP requests via Hono.fetch)', ()
     expect(setCookieHeader).toContain('deltix_refresh_token=');
     expect(setCookieHeader).toContain('HttpOnly');
     expect(setCookieHeader).toContain('SameSite=Strict');
+  });
+
+  it('does not mark the cookie Secure over plain HTTP, even with secureCookies=true (avoids the browser silently dropping it)', async () => {
+    const secureApp = createAuthRouter(service, true);
+    const res = await secureApp.request('/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'alice', password: 's3cret-pass' }),
+    });
+
+    const setCookieHeader = res.headers.get('set-cookie') ?? '';
+    expect(setCookieHeader).toContain('deltix_refresh_token=');
+    expect(setCookieHeader).not.toContain('Secure');
+  });
+
+  it('marks the cookie Secure when secureCookies=true and the request was forwarded over HTTPS by a reverse proxy', async () => {
+    const secureApp = createAuthRouter(service, true);
+    const res = await secureApp.request('/login', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-forwarded-proto': 'https',
+      },
+      body: JSON.stringify({ username: 'alice', password: 's3cret-pass' }),
+    });
+
+    const setCookieHeader = res.headers.get('set-cookie') ?? '';
+    expect(setCookieHeader).toContain('Secure');
   });
 
   it('POST /refresh restores a session from the cookie alone (browser reload scenario)', async () => {

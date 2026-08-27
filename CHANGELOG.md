@@ -9,7 +9,56 @@ Each entry starts with a **plain-language summary** (what changed, in
 everyday words) before any technical detail — written so someone outside
 engineering can understand what shipped and why it matters.
 
-## [0.3.1] - 2026-08-27
+## [0.3.2] - 2026-08-27
+
+**In plain terms:** three real production bugs, all traced to the same root
+cause. When the Admin Web UI is accessed over plain HTTP (no TLS — the
+normal setup for an internal/air-gapped VM), the browser was silently
+throwing away the login session cookie because the server was marking it
+"HTTPS only" just because `NODE_ENV=production` was set, regardless of
+whether the connection actually used HTTPS. Result: navigating to any admin
+page after the initial login (like "User management") bounced back to the
+login screen, and the Users/Repositories/Roles panels looked empty even
+though the data was really there — the page just couldn't prove who you
+were anymore. Also fixed: a global admin can now see and manage roles for
+*every* repository, not just ones they happen to already have a personal
+role on (previously the Roles panel would show "no repositories" for an
+admin who had never been individually granted access to any of them).
+
+### Fixed
+
+- **Session cookie silently dropped over plain HTTP, breaking the Admin
+  Web UI after the first page load.** The refresh-token cookie was marked
+  `Secure` whenever `NODE_ENV=production`, with no regard for whether the
+  request actually arrived over TLS. Browsers refuse to store or send
+  `Secure` cookies on a plain-HTTP origin, so any full page reload/navigation
+  (e.g. clicking "User management" → `/admin/users`) lost the session
+  entirely, even though login itself appeared to work. Now the cookie is
+  only marked `Secure` when the request genuinely arrived over HTTPS —
+  either directly, or via a reverse proxy setting `x-forwarded-proto:
+  https`. Deployments that terminate TLS at a reverse proxy are unaffected;
+  deployments that (like most Deltix-Server installs today) serve the
+  control plane over plain internal HTTP now keep working sessions.
+- **Admin Web UI showed "no repositories"/"no users" for a global admin who
+  had no personal role on any repo.** `GET /api/v1/versioning/repos` and the
+  repo-roles management endpoints only ever considered a caller's own
+  per-repo role, so a global admin who had never been individually granted
+  `reader`/`writer`/`admin` on a given repo couldn't see it at all — even
+  though the repo existed and other users could access it fine. Global
+  admins can now list, grant, and revoke roles on any repo regardless of
+  their own per-repo role. This does **not** grant global admins implicit
+  read/write access to repo *data* (push, merge, commit, diff, etc. still
+  require an explicit per-repo role) — it only unlocks the role-management
+  surface the Admin Web UI's Roles panel needs to actually do its job.
+- **Silent failures in the Admin Web UI looked identical to "genuinely
+  empty".** Users, Repositories/Roles, and Trusted-Addons panels caught
+  every fetch error (401/403/network failure) and rendered the same
+  "No users created yet." style placeholder as a truly empty list. These
+  now show a distinct "Failed to load — your session may have expired, try
+  refreshing" message instead, so a broken session is never mistaken for
+  missing data again.
+
+
 
 **In plain terms:** if you were already running a Deltix-Server before the
 global admin feature existed and then upgraded to v0.3.0, your existing
