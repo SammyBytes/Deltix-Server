@@ -10,9 +10,30 @@
     rel="stylesheet"
     href="https://cdn.jsdelivr.net/npm/driver.js@1.3.1/dist/driver.css"
   />
+  <style>
+    /* View Transitions: smooth cross-fade + slight rise when the DOM swaps
+       (login <-> session panel, and trust table refreshes). Guarded by a
+       feature check in app.js — browsers without support just get an
+       instant swap, no broken UI. */
+    ::view-transition-old(root),
+    ::view-transition-new(root) {
+      animation-duration: 240ms;
+      animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+    }
+    ::view-transition-old(trust-row),
+    ::view-transition-new(trust-row) {
+      animation-duration: 200ms;
+    }
+    [data-vt="trust-row"] {
+      view-transition-name: var(--vt-name, none);
+    }
+  </style>
 </head>
-<body class="h-full flex items-center justify-center text-neutral-100">
-  <main class="w-full max-w-sm rounded-lg border border-neutral-800 bg-neutral-900 p-6 shadow-xl">
+<body class="h-full flex items-center justify-center text-neutral-100 p-6">
+  <main
+    id="app-panel"
+    class="w-full max-w-sm rounded-lg border border-neutral-800 bg-neutral-900 p-6 shadow-xl transition-[max-width] duration-300"
+  >
     <h1 class="mb-1 text-lg font-semibold">Deltix Admin</h1>
     <p class="mb-6 text-sm text-neutral-400">Sign in with your local Deltix account.</p>
 
@@ -49,16 +70,18 @@
     </form>
 
     <section id="session-panel" class="hidden" data-driver="session-panel">
-      <p class="mb-4 text-sm">
-        Signed in as <span id="session-username" class="font-semibold"></span>
-      </p>
-      <button
-        id="logout-button"
-        type="button"
-        class="w-full rounded-md border border-neutral-700 px-3 py-2 text-sm hover:bg-neutral-800"
-      >
-        Sign out
-      </button>
+      <div class="flex items-center justify-between">
+        <p class="text-sm">
+          Signed in as <span id="session-username" class="font-semibold"></span>
+        </p>
+        <button
+          id="logout-button"
+          type="button"
+          class="rounded-md border border-neutral-700 px-3 py-1.5 text-sm hover:bg-neutral-800"
+        >
+          Sign out
+        </button>
+      </div>
 
       <hr class="my-5 border-neutral-800" />
 
@@ -69,7 +92,7 @@
         Takes effect on the next server restart.
       </p>
 
-      <form id="trust-form" class="space-y-3">
+      <form id="trust-form" class="grid grid-cols-1 gap-3 sm:grid-cols-[1fr_2fr_auto] sm:items-end">
         <div>
           <label for="trust-addon-name" class="mb-1 block text-xs font-medium text-neutral-300">Addon name</label>
           <input
@@ -88,22 +111,39 @@
           <textarea
             id="trust-public-key"
             name="authorPublicKey"
-            rows="2"
+            rows="1"
             placeholder="base64-encoded raw 32-byte Ed25519 public key"
             required
-            class="w-full rounded-md border border-neutral-700 bg-neutral-950 px-3 py-2 font-mono text-xs outline-none focus:border-neutral-400"
+            class="w-full resize-y rounded-md border border-neutral-700 bg-neutral-950 px-3 py-2 font-mono text-xs outline-none focus:border-neutral-400"
           ></textarea>
         </div>
         <button
           type="submit"
-          class="w-full rounded-md bg-neutral-100 px-3 py-2 text-sm font-medium text-neutral-900 hover:bg-white"
+          class="h-[38px] rounded-md bg-neutral-100 px-4 text-sm font-medium text-neutral-900 hover:bg-white"
         >
-          Trust this key
+          Trust key
         </button>
-        <p id="trust-message" class="hidden text-sm" role="status"></p>
       </form>
+      <p id="trust-message" class="mt-2 hidden text-sm" role="status"></p>
 
-      <ul id="trust-list" class="mt-4 space-y-2 text-xs"></ul>
+      <div class="mt-4 overflow-hidden rounded-md border border-neutral-800">
+        <table class="w-full text-left text-xs">
+          <thead>
+            <tr class="border-b border-neutral-800 bg-neutral-800/60 text-neutral-400">
+              <th class="px-3 py-2 font-medium">Addon</th>
+              <th class="px-3 py-2 font-medium">Public key</th>
+              <th class="px-3 py-2 font-medium">Trusted</th>
+              <th class="px-3 py-2 font-medium">By</th>
+              <th class="px-3 py-2"></th>
+            </tr>
+          </thead>
+          <tbody id="trust-list">
+            <tr id="trust-empty-row">
+              <td class="px-3 py-4 text-center text-neutral-500" colspan="5">No community addons trusted yet.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
     </section>
   </main>
 

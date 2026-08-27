@@ -23,19 +23,37 @@ function showError(message) {
   errorMessage.classList.remove('hidden');
 }
 
+/**
+ * Wraps a DOM mutation in the View Transitions API when the browser
+ * supports it, so swaps (login <-> session, trust list refresh) cross-fade
+ * smoothly instead of popping. Falls back to a plain synchronous call on
+ * browsers without support (e.g. older Firefox) — never blocks on it.
+ */
+function withViewTransition(mutate) {
+  if (typeof document.startViewTransition === 'function') {
+    document.startViewTransition(() => mutate());
+  } else {
+    mutate();
+  }
+}
+
 function showSession(username) {
-  currentUsername = username;
-  form.classList.add('hidden');
-  sessionPanel.classList.remove('hidden');
-  sessionUsername.textContent = username;
+  withViewTransition(() => {
+    currentUsername = username;
+    form.classList.add('hidden');
+    sessionPanel.classList.remove('hidden');
+    sessionUsername.textContent = username;
+  });
 }
 
 function showForm() {
-  currentUsername = null;
-  accessToken = null;
-  sessionPanel.classList.add('hidden');
-  form.classList.remove('hidden');
-  form.reset();
+  withViewTransition(() => {
+    currentUsername = null;
+    accessToken = null;
+    sessionPanel.classList.add('hidden');
+    form.classList.remove('hidden');
+    form.reset();
+  });
 }
 
 form.addEventListener('submit', async (event) => {
@@ -87,25 +105,59 @@ function showTrustMessage(text, isError) {
 }
 
 function renderTrustedAddons(trusted) {
-  trustList.innerHTML = '';
-  if (trusted.length === 0) {
-    trustList.innerHTML = '<li class="text-neutral-500">No community addons trusted yet.</li>';
-    return;
-  }
-  for (const record of trusted) {
-    const li = document.createElement('li');
-    li.className = 'flex items-center justify-between rounded border border-neutral-800 px-2 py-1.5';
-    const label = document.createElement('span');
-    label.textContent = record.addonName;
-    label.className = 'font-mono';
-    const revokeBtn = document.createElement('button');
-    revokeBtn.type = 'button';
-    revokeBtn.textContent = 'Revoke';
-    revokeBtn.className = 'text-red-400 hover:text-red-300';
-    revokeBtn.addEventListener('click', () => revokeTrust(record.addonName));
-    li.append(label, revokeBtn);
-    trustList.append(li);
-  }
+  withViewTransition(() => {
+    trustList.innerHTML = '';
+
+    if (trusted.length === 0) {
+      const emptyRow = document.createElement('tr');
+      emptyRow.id = 'trust-empty-row';
+      emptyRow.innerHTML =
+        '<td class="px-3 py-4 text-center text-neutral-500" colspan="5">No community addons trusted yet.</td>';
+      trustList.append(emptyRow);
+      return;
+    }
+
+    for (const record of trusted) {
+      const row = document.createElement('tr');
+      row.className = 'border-b border-neutral-800 last:border-0 hover:bg-neutral-800/40';
+      row.dataset.vt = 'trust-row';
+      row.style.setProperty('--vt-name', `trust-row-${cssSafe(record.addonName)}`);
+
+      const nameCell = document.createElement('td');
+      nameCell.className = 'px-3 py-2 font-mono';
+      nameCell.textContent = record.addonName;
+
+      const keyCell = document.createElement('td');
+      keyCell.className = 'max-w-[220px] truncate px-3 py-2 font-mono text-neutral-400';
+      keyCell.title = record.authorPublicKey;
+      keyCell.textContent = record.authorPublicKey;
+
+      const trustedAtCell = document.createElement('td');
+      trustedAtCell.className = 'px-3 py-2 text-neutral-400';
+      trustedAtCell.textContent = new Date(record.trustedAt).toLocaleString();
+
+      const byCell = document.createElement('td');
+      byCell.className = 'px-3 py-2 text-neutral-400';
+      byCell.textContent = record.trustedBy;
+
+      const actionCell = document.createElement('td');
+      actionCell.className = 'px-3 py-2 text-right';
+      const revokeBtn = document.createElement('button');
+      revokeBtn.type = 'button';
+      revokeBtn.textContent = 'Revoke';
+      revokeBtn.className = 'text-red-400 hover:text-red-300';
+      revokeBtn.addEventListener('click', () => revokeTrust(record.addonName));
+      actionCell.append(revokeBtn);
+
+      row.append(nameCell, keyCell, trustedAtCell, byCell, actionCell);
+      trustList.append(row);
+    }
+  });
+}
+
+/** Sanitizes an addon name into a safe CSS identifier for view-transition-name. */
+function cssSafe(value) {
+  return value.replace(/[^a-zA-Z0-9-]/g, '-');
 }
 
 async function loadTrustedAddons() {
