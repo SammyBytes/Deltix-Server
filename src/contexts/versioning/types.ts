@@ -22,6 +22,35 @@ export interface BranchSummary {
   isCurrent: boolean;
 }
 
+export interface LogCommitEntry {
+  commitHash: string;
+  author: string;
+  authorEmail: string;
+  timestamp: string;
+  message: string;
+  parents: string[];
+}
+
+export interface DiffRowChange {
+  diffType: 'added' | 'removed' | 'modified';
+  oldValues: Record<string, string | null>;
+  newValues: Record<string, string | null>;
+}
+
+export interface DiffTableSummary {
+  table: string;
+  diffType: string;
+  dataChange: boolean;
+  schemaChange: boolean;
+  changes: DiffRowChange[];
+}
+
+export interface DiffResult {
+  fromRef: string;
+  toRef: string;
+  tables: DiffTableSummary[];
+}
+
 export interface MergeConflictRow {
   fromRootIsh: string | null;
   base: Record<string, string | null>;

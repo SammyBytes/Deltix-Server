@@ -52,6 +52,20 @@ export class InvalidBranchNameError extends Error {
   }
 }
 
+export class InvalidCommitReferenceError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'InvalidCommitReferenceError';
+  }
+}
+
+export class InvalidPaginationLimitError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'InvalidPaginationLimitError';
+  }
+}
+
 export class BranchAlreadyExistsError extends Error {
   constructor(message: string) {
     super(message);

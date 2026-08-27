@@ -89,6 +89,19 @@ Protected-branch rules enforced by the service:
 - current checked-out branch cannot be deleted
 - `main` cannot be deleted
 
+## Fase 5.5 — log y diff
+
+`LogService` and `DiffService` expose read-only Dolt history queries for provisioned repos without taking the branch mutex, because `dolt_log` / `dolt_diff*` are pure read operations over system tables and do not mutate the shared working directory.
+
+- `runDoltReadLog()` queries `dolt_log` (optionally `AS OF '<branch>'`) and returns structured commits with `commitHash`, `author`, `authorEmail`, `timestamp`, `message`, and parsed `parents`.
+- `runDoltReadDiff()` queries `dolt_diff_summary(from,to)` to discover changed tables, then `dolt_diff(from,to,table)` per table to translate row-level changes into `{ diffType, oldValues, newValues }`.
+- Branch names and commit refs are validated with the same allow-list discipline already used for branching/merge before any ref is interpolated into a `dolt sql -q` string.
+
+REST API surface:
+
+- `GET /api/v1/versioning/repos/:repoId/log?branch=<name>&limit=<n>`
+- `GET /api/v1/versioning/repos/:repoId/diff?from=<ref>&to=<ref>`
+
 ## Fase 5.8 — sync preferences
 
 `LibsqlRepoStore` now persists per-repo sync preferences in the same libSQL
@@ -152,5 +165,4 @@ interleave on the same real Dolt working directory.
 
 ## Not yet implemented
 
-- merge/conflicts, log/diff, and per-repo/branch authorization — see the
-  ADR for the remaining Fase 5 sub-phases.
+- per-repo/branch authorization — see the ADR for the remaining Fase 5 sub-phases.

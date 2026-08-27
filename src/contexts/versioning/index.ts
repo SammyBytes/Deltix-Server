@@ -10,6 +10,7 @@ export type { PushCommitParams, RunDoltCommit } from './commit.service';
 export { CommitService } from './commit.service';
 export type { VersioningServices } from './create-versioning-services';
 export { createVersioningServices } from './create-versioning-services';
+export { DiffService } from './diff.service';
 export {
   runDoltCheckoutBranch,
   runDoltCreateBranch,
@@ -19,7 +20,9 @@ export {
 } from './dolt-branch-cli';
 export { runDoltInit } from './dolt-cli';
 export { runDoltCommit } from './dolt-commit-cli';
+export { runDoltReadDiff } from './dolt-diff-cli';
 export { assertSafeTableName, readForeignKeyEdges } from './dolt-foreign-key-reader';
+export { runDoltReadLog } from './dolt-log-cli';
 export {
   runDoltCheckoutBranch as runDoltMergeCheckoutBranch,
   runDoltCurrentBranch as runDoltMergeCurrentBranch,
@@ -33,6 +36,8 @@ export {
   BranchNotFoundError,
   CommitFailedError,
   InvalidBranchNameError,
+  InvalidCommitReferenceError,
+  InvalidPaginationLimitError,
   InvalidRepoIdError,
   MergeConflictError,
   ProtectedBranchError,
@@ -42,6 +47,7 @@ export {
   SyncPreferenceConflictError,
 } from './errors';
 export { LibsqlRepoStore } from './libsql-repo-store';
+export { LogService } from './log.service';
 export { MergeService } from './merge.service';
 export { RepoBranchMutex, sharedRepoBranchMutex } from './repo-branch-mutex';
 export type { RunDoltInit } from './repo-provisioning.service';
@@ -59,6 +65,10 @@ export type {
 } from './sync-preference-types';
 export type {
   BranchSummary,
+  DiffResult,
+  DiffRowChange,
+  DiffTableSummary,
+  LogCommitEntry,
   MergeConflictRow,
   MergeConflictTable,
   MergeResult,

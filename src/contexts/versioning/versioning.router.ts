@@ -4,10 +4,13 @@ import { z } from 'zod';
 import { createLogger } from '../../shared/logger';
 import type { AuthService } from '../auth';
 import type { BranchService } from './branch.service';
+import type { DiffService } from './diff.service';
 import {
   BranchAlreadyExistsError,
   BranchNotFoundError,
   InvalidBranchNameError,
+  InvalidCommitReferenceError,
+  InvalidPaginationLimitError,
   InvalidRepoIdError,
   MergeConflictError,
   ProtectedBranchError,
@@ -15,6 +18,7 @@ import {
   RepoNotFoundError,
   SyncPreferenceConflictError,
 } from './errors';
+import type { LogService } from './log.service';
 import type { MergeService } from './merge.service';
 import type { RepoProvisioningService } from './repo-provisioning.service';
 import type { SyncPreferenceService } from './sync-preference.service';
@@ -32,6 +36,16 @@ const branchRequestSchema = z.object({
 const mergeRequestSchema = z.object({
   sourceBranch: z.string().min(1).max(128),
   targetBranch: z.string().min(1).max(128).optional(),
+});
+
+const logQuerySchema = z.object({
+  branch: z.string().min(1).max(128).optional(),
+  limit: z.coerce.number().int().min(1).max(500).optional(),
+});
+
+const diffQuerySchema = z.object({
+  from: z.string().min(1).max(128),
+  to: z.string().min(1).max(128),
 });
 
 const syncRequestSchema = z.object({
@@ -120,6 +134,21 @@ function handleMergeError(err: unknown, fallback: string) {
   return { body: { error: fallback }, status: 500 };
 }
 
+function handleHistoryError(err: unknown, fallback: string) {
+  if (
+    err instanceof InvalidRepoIdError ||
+    err instanceof InvalidBranchNameError ||
+    err instanceof InvalidCommitReferenceError ||
+    err instanceof InvalidPaginationLimitError
+  ) {
+    return { body: { error: err.message }, status: 400 };
+  }
+  if (err instanceof RepoNotFoundError || err instanceof BranchNotFoundError) {
+    return { body: { error: err.message }, status: 404 };
+  }
+  return { body: { error: fallback }, status: 500 };
+}
+
 function handleSyncError(err: unknown, fallback: string) {
   if (err instanceof InvalidRepoIdError) {
     return { body: { error: err.message }, status: 400 };
@@ -139,6 +168,8 @@ export function createVersioningRouter(
   syncPreferenceService?: SyncPreferenceService,
   branchService?: BranchService,
   mergeService?: MergeService,
+  logService?: LogService,
+  diffService?: DiffService,
 ): Hono {
   const app = new Hono();
 
@@ -191,6 +222,53 @@ export function createVersioningRouter(
     }
     return c.json({ repo }, 200);
   });
+
+  if (logService) {
+    app.get('/repos/:repoId/log', async (c) => {
+      const username = await requireUsername(c, authService);
+      if (typeof username !== 'string') {
+        return username;
+      }
+      const parsed = logQuerySchema.safeParse(c.req.query());
+      if (!parsed.success) {
+        return c.json({ error: 'Invalid query string', details: parsed.error.issues }, 400);
+      }
+      try {
+        const commits = await logService.list(c.req.param('repoId'), {
+          ...(parsed.data.branch ? { branch: parsed.data.branch } : {}),
+          ...(parsed.data.limit !== undefined ? { limit: parsed.data.limit } : {}),
+        });
+        return c.json({ log: { commits, limit: Math.min(parsed.data.limit ?? 50, 200) } }, 200);
+      } catch (err) {
+        const handled = handleHistoryError(err, 'Failed to read repo log');
+        return c.json(handled.body, handled.status as 400 | 404 | 500);
+      }
+    });
+  }
+
+  if (diffService) {
+    app.get('/repos/:repoId/diff', async (c) => {
+      const username = await requireUsername(c, authService);
+      if (typeof username !== 'string') {
+        return username;
+      }
+      const parsed = diffQuerySchema.safeParse(c.req.query());
+      if (!parsed.success) {
+        return c.json({ error: 'Invalid query string', details: parsed.error.issues }, 400);
+      }
+      try {
+        const diff = await diffService.read(
+          c.req.param('repoId'),
+          parsed.data.from,
+          parsed.data.to,
+        );
+        return c.json({ diff }, 200);
+      } catch (err) {
+        const handled = handleHistoryError(err, 'Failed to read repo diff');
+        return c.json(handled.body, handled.status as 400 | 404 | 500);
+      }
+    });
+  }
 
   if (mergeService) {
     app.post('/repos/:repoId/merge', async (c) => {

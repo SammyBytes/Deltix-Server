@@ -53,6 +53,8 @@ async function main(): Promise<void> {
     commitService,
     branchService,
     mergeService,
+    logService,
+    diffService,
     syncPreferenceService,
   } = await createVersioningServices(env);
   const secureCookies = env.NODE_ENV === 'production';
@@ -66,6 +68,8 @@ async function main(): Promise<void> {
     syncPreferenceService,
     branchService,
     mergeService,
+    logService,
+    diffService,
   );
   const app = new Hono();
   applySecurityMiddleware(app, { allowedOrigins: env.DELTIX_CORS_ALLOWED_ORIGINS });

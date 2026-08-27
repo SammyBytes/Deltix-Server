@@ -8,7 +8,9 @@ import { LibsqlSessionStore } from '../../../src/contexts/auth/libsql-session-st
 import { LibsqlUserStore } from '../../../src/contexts/auth/libsql-user-store';
 import { hashPassword } from '../../../src/contexts/auth/password-authenticator';
 import { BranchService } from '../../../src/contexts/versioning/branch.service';
+import { DiffService } from '../../../src/contexts/versioning/diff.service';
 import { LibsqlRepoStore } from '../../../src/contexts/versioning/libsql-repo-store';
+import { LogService } from '../../../src/contexts/versioning/log.service';
 import { MergeService } from '../../../src/contexts/versioning/merge.service';
 import { RepoProvisioningService } from '../../../src/contexts/versioning/repo-provisioning.service';
 import { SyncPreferenceService } from '../../../src/contexts/versioning/sync-preference.service';
@@ -87,6 +89,39 @@ describe('versioning/versioning.router (integration, real HTTP requests via Hono
       runDoltCheckoutBranch: mock(async () => {}),
       runDoltDeleteBranch: mock(async () => {}),
     });
+    const logService = new LogService(repoStore, {
+      runDoltReadLog: mock(async ({ branchName, limit }) => [
+        {
+          commitHash: '3lfs06dv07gacfldu98ml064ks0n2rtm',
+          author: branchName ?? 'alice',
+          authorEmail: 'alice@example.com',
+          timestamp: '2026-08-27 11:27:53.188',
+          message: `limit=${limit}`,
+          parents: ['apdhclv4ccmlg921t1ot845rptsp24jp'],
+        },
+      ]),
+    });
+    const diffService = new DiffService(repoStore, {
+      runDoltReadDiff: mock(async ({ fromRef, toRef }) => ({
+        fromRef,
+        toRef,
+        tables: [
+          {
+            table: 'items',
+            diffType: 'modified',
+            dataChange: true,
+            schemaChange: false,
+            changes: [
+              {
+                diffType: 'modified' as const,
+                oldValues: { id: '1', value: 'a' },
+                newValues: { id: '1', value: 'b' },
+              },
+            ],
+          },
+        ],
+      })),
+    });
     const mergeService = new MergeService(repoStore, {
       runDoltMerge: mock(async ({ sourceBranch, targetBranch }) => ({
         exitCode: sourceBranch === 'feature/conflict' ? 1 : 0,
@@ -127,6 +162,8 @@ describe('versioning/versioning.router (integration, real HTTP requests via Hono
       syncPreferenceService,
       branchService,
       mergeService,
+      logService,
+      diffService,
     );
   });
 
@@ -321,6 +358,80 @@ describe('versioning/versioning.router (integration, real HTTP requests via Hono
       expect(res.status).toBe(409);
       const body = (await res.json()) as { error: string };
       expect(body.error).toContain('FK dependencies');
+    });
+  });
+
+  describe('history endpoints', () => {
+    it('reads repo log with optional branch and clamped limit', async () => {
+      const token = await loginAndGetAccessToken();
+      await app.request('/repos', {
+        method: 'POST',
+        headers: { authorization: ['Bearer ', token].join(''), 'content-type': 'application/json' },
+        body: JSON.stringify({ repoId: 'demo-repo' }),
+      });
+
+      const res = await app.request('/repos/demo-repo/log?branch=feature%2Fdemo&limit=200', {
+        headers: { authorization: ['Bearer ', token].join('') },
+      });
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        log: { limit: number; commits: Array<{ author: string; message: string }> };
+      };
+      expect(body.log.limit).toBe(200);
+      expect(body.log.commits[0]?.author).toBe('feature/demo');
+      expect(body.log.commits[0]?.message).toBe('limit=200');
+    });
+
+    it('rejects invalid log query params with 400', async () => {
+      const token = await loginAndGetAccessToken();
+      await app.request('/repos', {
+        method: 'POST',
+        headers: { authorization: ['Bearer ', token].join(''), 'content-type': 'application/json' },
+        body: JSON.stringify({ repoId: 'demo-repo' }),
+      });
+
+      const res = await app.request('/repos/demo-repo/log?limit=0', {
+        headers: { authorization: ['Bearer ', token].join('') },
+      });
+
+      expect(res.status).toBe(400);
+    });
+
+    it('reads repo diff between two refs', async () => {
+      const token = await loginAndGetAccessToken();
+      await app.request('/repos', {
+        method: 'POST',
+        headers: { authorization: ['Bearer ', token].join(''), 'content-type': 'application/json' },
+        body: JSON.stringify({ repoId: 'demo-repo' }),
+      });
+
+      const res = await app.request('/repos/demo-repo/diff?from=main&to=feature%2Fdemo', {
+        headers: { authorization: ['Bearer ', token].join('') },
+      });
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        diff: { fromRef: string; toRef: string; tables: Array<{ table: string }> };
+      };
+      expect(body.diff.fromRef).toBe('main');
+      expect(body.diff.toRef).toBe('feature/demo');
+      expect(body.diff.tables[0]?.table).toBe('items');
+    });
+
+    it('rejects missing diff refs with 400', async () => {
+      const token = await loginAndGetAccessToken();
+      await app.request('/repos', {
+        method: 'POST',
+        headers: { authorization: ['Bearer ', token].join(''), 'content-type': 'application/json' },
+        body: JSON.stringify({ repoId: 'demo-repo' }),
+      });
+
+      const res = await app.request('/repos/demo-repo/diff?from=main', {
+        headers: { authorization: ['Bearer ', token].join('') },
+      });
+
+      expect(res.status).toBe(400);
     });
   });
 

@@ -81,7 +81,7 @@ mismo patrón que Fases 1-4. Ninguna sub-fase empieza sin luz verde explícita d
 - El mutex es **in-process**, suficiente para la topología actual de un único proceso Bun. Si en el futuro hubiera múltiples instancias apuntando al mismo repo físico, haría falta un lock distribuido o por filesystem.
 - Los comandos CLI del cliente para branching siguen fuera de alcance en esta sub-fase; solo se habilita la superficie server-side.
 | 5.4 | **Merge y conflictos** | `dolt merge`, traduciendo conflictos SQL crudos a JSON estructurado y legible | Server, Client |
-| 5.5 | **Historial / diff navegable** | `dolt_log` / `dolt_diff` (mismo patrón de lectura ya usado en `licensing/dolt-commit-log.reader.ts`) expuestos como `deltix log` / `deltix diff` | Server, Client |
+| 5.5 | **Historial / diff navegable** | `dolt_log` / `dolt_diff` expuestos vía REST server-side como `GET /repos/:repoId/log` y `GET /repos/:repoId/diff` (CLI client queda fuera de alcance por ahora) | Server |
 | 5.6 | **Autorización por repo/branch** | Extensión de `auth` con ACL nueva hacia `versioning` (rol simple por repo: lector/escritor/admin — NO RBAC granular todavía, mantener simple) | Server |
 | **5.7** | **Gestión de usuarios en Admin UI** (nuevo, pedido 2026-08-27) | CRUD visual de usuarios (crear/editar/desactivar/eliminar), listado de sesiones activas por usuario, setup inicial de primer admin | Server (admin-ui + auth) |
 | **5.8** | **Preferencias de sincronización** (nuevo, pedido 2026-08-27) | Selección de "solo schema" vs "schema + datos"; selección de tablas a sincronizar con expansión automática por FK y dry-run server-side | Server (versioning), Client (flags de `push`) |
@@ -95,6 +95,45 @@ modelo de usuarios ya existe de verdad)**.
 ---
 
 ## 3.2. Sub-fase 5.4 — Merge y conflictos (detalle)
+## 3.3. Sub-fase 5.5 — Log y diff (detalle)
+
+### Problema actual
+- Fase 5.3/5.4 ya permiten crear ramas y reconciliarlas con merges reales, pero todavía no existe una forma server-side de inspeccionar el historial de commits o comparar dos refs sin entrar manualmente al CLI de Dolt.
+- El output humano de `dolt log` / `dolt diff` no es un contrato API estable ni legible para consumidores REST. El contexto `versioning` ya resolvió este problema para conflictos en 5.4, así que 5.5 debe seguir la misma filosofía: leer tablas/funciones SQL crudas y traducirlas a JSON estructurado.
+- Sin paginación defensiva, un repo con historial largo podría devolver respuestas no acotadas y costosas.
+
+### Alcance propuesto
+1. **Historial estructurado**:
+   - Exponer `GET /api/v1/versioning/repos/:repoId/log`.
+   - `?branch=<name>` es opcional; sin ese query param se lee el historial de la rama/working tree actual.
+   - `?limit=<n>` pagina el resultado con default `50` y clamp server-side a `200`.
+   - La fuente de verdad es `dolt_log`, no el texto de `dolt log`. En Dolt 2.3.0 se confirmaron las columnas: `commit_hash`, `committer`, `email`, `date`, `message`, `commit_order`, `parents`, `refs`, `signature`, `author`, `author_email`, `author_date`.
+2. **Diff estructurado entre refs**:
+   - Exponer `GET /api/v1/versioning/repos/:repoId/diff?from=<ref>&to=<ref>`.
+   - Primero se consulta `dolt_diff_summary(from,to)` para descubrir qué tablas cambiaron y si el cambio fue de datos y/o schema.
+   - Luego, por cada tabla, se consulta `dolt_diff(from,to,table)` y se traduce a JSON por tabla con cambios fila a fila. En Dolt 2.3.0 se confirmó que una tabla `items(id,name)` devuelve columnas prefijadas `to_*`, `from_*`, más `to_commit`, `to_commit_date`, `from_commit`, `from_commit_date`, y `diff_type`.
+3. **Validación defensiva**:
+   - Reutilizar la allow-list exacta de ramas de 5.3/5.4 (`VALID_BRANCH`) para cualquier query param que represente una rama.
+   - Aceptar hashes de commit Dolt solo si cumplen el shape real observado en Dolt 2.3.0: 32 caracteres lowercase alfanuméricos (`^[0-9a-z]{32}$`).
+   - Validar también nombres de tabla derivados de `dolt_diff_summary` con `^[A-Za-z_][A-Za-z0-9_]*$` antes de interpolarlos en `dolt sql -q`.
+4. **Errores tipados / fail-closed**:
+   - Repo inexistente: `RepoNotFoundError`.
+   - Rama inexistente: reutilizar `BranchNotFoundError`.
+   - Ref inválida (branch/hash con shape no permitida): `InvalidCommitReferenceError`.
+   - Límite inválido: `InvalidPaginationLimitError`.
+
+### Decisiones de diseño resueltas
+- **Sin mutex para log/diff**: a diferencia de create/checkout/delete/merge, estas operaciones solo ejecutan `SELECT`/funciones de lectura sobre `dolt_log` y `dolt_diff*`. No mutan el working tree compartido ni dejan estado intermedio, así que pueden correr concurrentemente sin usar `RepoBranchMutex`. Esto se documenta explícitamente para evitar sobreservializar lecturas inocuas.
+- **Shape del log JSON**: cada commit se expone como `{ commitHash, author, authorEmail, timestamp, message, parents }`. Se eligió `author*` en vez de `committer*` porque el commit de push ya modela la autoría como parte del dominio visible al usuario, y `parents` se normaliza a `string[]` para evitar que el consumidor tenga que parsear la lista cruda de Dolt.
+- **Shape del diff JSON**: la respuesta se modela como `{ fromRef, toRef, tables }`, donde cada tabla es `{ table, diffType, dataChange, schemaChange, changes }` y cada cambio fila a fila es `{ diffType, oldValues, newValues }`. Igual que en 5.4, se preserva agnosticismo de schema usando mapas columna→valor en vez de columnas fijas.
+- **Paginación simple y defensiva**: no se introduce cursoring todavía; `limit` entero con default 50 y max 200 es suficiente para esta sub-fase server-only y evita respuestas no acotadas.
+- **Server-only por ahora**: aunque la fila original mencionaba también `deltix log` / `deltix diff`, esta entrega implementa primero la superficie REST del server. El cliente CLI queda fuera de alcance para no mezclar contextos/repositorios en esta sub-fase.
+
+### Implicaciones / límites conocidos
+- `GET /log` sobre una rama usa `dolt_log AS OF '<branch>'`, por lo que refleja el historial alcanzable desde esa ref sin cambiar el checkout global del repo.
+- `GET /diff` hoy devuelve cambios estructurados por tabla, pero no intenta renderizar un patch textual tipo unified diff; ese formato humano puede agregarse después en el cliente si hiciera falta.
+- La validación del hash está basada en el shape real observado en Dolt 2.3.0 durante esta implementación; si una futura versión de Dolt cambia el formato, habrá que actualizar el regex de allow-list antes de aceptar el nuevo shape.
+
 
 ### Problema actual
 - Fase 5.3 ya permite crear/cambiar/borrar ramas reales, pero todavía no existe una operación server-side para reconciliar dos líneas de trabajo sobre el mismo repo Dolt.
@@ -283,7 +322,7 @@ modelo de usuarios ya existe de verdad)**.
 | 5.2 | ✅ Completa — `CommitService` + `runDoltCommit` real (upsert en `deltix_push_log` + `dolt add -A && dolt commit --author`), invocado best-effort tras `PushSessionHandler.finish()` vía hook inyectado (`OnPushCommitted`, ACL storage→versioning); repos sin provisionar via 5.1 quedan como no-op retrocompatible. Client `commit_id` visible queda para una iteración posterior. 34 tests nuevos (unit+integration+smoke) en verde |
 | 5.3 | ✅ Completa — `BranchService` + `dolt-branch-cli` exponen create/list/current/checkout/delete reales sobre repos provisionados, con validación defensiva de nombres, protección de `main`, rechazo de borrar la rama activa y endpoints JWT `/api/v1/versioning/repos/:repoId/branches*`; operaciones mutantes serializadas por repo con mutex in-process. |
 | 5.4 | ✅ Completa — `MergeService` + `dolt-merge-cli` exponen `POST /api/v1/versioning/repos/:repoId/merge`, ejecutan `dolt merge` real, traducen `dolt_conflicts*` a JSON estructurado y auto-abortan merges conflictuados tras capturar conflictos para dejar el working tree limpio y predecible. |
-| 5.5 | ⏳ No iniciada |
+| 5.5 | ✅ Completada |
 | 5.6 | ⏳ No iniciada |
 | 5.7 | ✅ Completa — `contexts/auth` migra a `LibsqlUserStore` con bootstrap env opcional + fallback legacy `DELTIX_LOCAL_USERS`; `AuthService` agrega setup inicial race-safe, CRUD/soft-delete/hard-delete con analítica de sesiones activas, y Admin UI incorpora `/admin/setup` + panel `/admin/users` con tours driver.js independientes. |
 | 5.8 | ✅ Completa — `contexts/versioning` ahora persiste preferencias por repo en la misma libSQL de `repos`, expone `GET/PUT /api/v1/versioning/repos/:repoId/sync-preferences` y `POST /api/v1/versioning/repos/:repoId/sync-preferences/dry-run`, y revalida server-side el cierre transitivo de FKs antes de aceptar overrides por ticket/push. |
