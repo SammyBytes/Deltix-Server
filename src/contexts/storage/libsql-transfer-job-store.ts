@@ -43,6 +43,12 @@ export class LibsqlTransferJobStore implements TransferJobStore {
   }
 
   async init(): Promise<void> {
+    // WAL lets concurrent readers run while a writer holds the commit lock
+    // (libSQL default rollback-journal mode returns SQLITE_BUSY to a second
+    // connection during an in-flight write); busy_timeout makes writers wait
+    // briefly for the lock instead of failing immediately.
+    await this.client.execute('PRAGMA journal_mode = WAL');
+    await this.client.execute('PRAGMA busy_timeout = 5000');
     await this.client.execute(`
       CREATE TABLE IF NOT EXISTS transfer_jobs (
         id TEXT PRIMARY KEY,

@@ -45,6 +45,10 @@ export class LibsqlUserStore implements UserStore {
   }
 
   async init(): Promise<void> {
+    // WAL + busy_timeout keep a second connection readable during a write
+    // (see libsql-transfer-job-store.ts).
+    await this.client.execute('PRAGMA journal_mode = WAL');
+    await this.client.execute('PRAGMA busy_timeout = 5000');
     await this.client.execute(`
       CREATE TABLE IF NOT EXISTS users (
         username TEXT PRIMARY KEY,

@@ -9,6 +9,42 @@ Each entry starts with a **plain-language summary** (what changed, in
 everyday words) before any technical detail — written so someone outside
 engineering can understand what shipped and why it matters.
 
+## [0.6.3] - 2026-08-28
+
+**In plain terms:** this patch makes the server behave correctly when several
+things try to use the same data file at the same time. The server keeps its
+records (users, sessions, file-transfer jobs, repositories) in small local
+database files. Under the default settings, if a read happened in the exact
+moment a write was still finishing, the read failed with a "database is
+locked" error — which could surface as a momentarily empty screen in the admin
+panel right after a change. The server's databases now use a more
+collaborative journaling mode plus a short "wait for the lock" timeout, so
+concurrent reads and writes no longer collide. The automated test suite on the
+build server caught this because the very same race also made a test fail
+intermittently.
+
+### Fixed
+
+- **`SQLITE_BUSY: database is locked` errors in libSQL-backed stores**: none of
+  the six libSQL store implementations enabled WAL (`journal_mode = WAL`) nor a
+  busy timeout, so a second connection performing a read while the storing
+  process held an in-flight write transaction failed immediately with
+  `SQLITE_BUSY`. The CI smoke suite surfaced this consistently as
+  "allows an operator to manually requeue a dead_letter job via the API". All
+  stores now run `PRAGMA journal_mode = WAL` and `PRAGMA busy_timeout = 5000`
+  in `init()` (persistent per database file), matching the WAL discipline the
+  `doctor` suite already expects.
+  - Affected: `addon-trust`, `session`, `user`, `transfer-job`, `ticket`,
+    `repo`, and `repo-sync-preference` stores.
+
+### Tests
+
+- Full local verification: lint clean (0 errors), unit **259 pass / 0 fail**,
+  smoke **34 pass / 0 fail** (the previously flaky `storage-boot` requeue test
+  now passes reliably, locally and in CI).
+- The WAL journal mode is asserted by the existing `doctor` SQLite-integrity
+  check and coverage is exercised by the storage `boot` smoke suite.
+
 ## [0.6.2] - 2026-08-28
 
 **In plain terms:** this patch makes it possible to actually *see* what is

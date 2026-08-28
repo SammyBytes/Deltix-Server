@@ -26,6 +26,10 @@ export class LibsqlSyncPreferenceStore implements SyncPreferenceStore {
   }
 
   async init(): Promise<void> {
+    // WAL + busy_timeout keep a second connection readable during a write
+    // (see libsql-transfer-job-store.ts).
+    await this.client.execute('PRAGMA journal_mode = WAL');
+    await this.client.execute('PRAGMA busy_timeout = 5000');
     await this.client.execute(`
       CREATE TABLE IF NOT EXISTS repo_sync_preferences (
         repo_id TEXT PRIMARY KEY,
