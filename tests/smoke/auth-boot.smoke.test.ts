@@ -11,6 +11,7 @@ import {
   signLicensePayload,
 } from '../fixtures/license-fixtures';
 import { generateSelfSignedCert } from '../fixtures/tls-fixtures';
+import { waitForServerReady } from '../helpers/wait-for-server';
 
 const ENTRYPOINT = join(import.meta.dir, '..', '..', 'src', 'index.ts');
 
@@ -67,8 +68,8 @@ describe('auth boot smoke test (real subprocess, real HTTP server, real login fl
       stderr: 'pipe',
     });
 
-    // Give the server a moment to boot and start listening.
-    await new Promise((resolve) => setTimeout(resolve, 800));
+    // Wait for the server to boot and start listening.
+    await waitForServerReady(httpPort);
   });
 
   afterAll(async () => {

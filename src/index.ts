@@ -159,6 +159,62 @@ async function main(): Promise<void> {
     );
   }
 
+  // Add-on loading (Fase 4): fail-closed pipeline — manifest -> closed
+  // capability list -> signature (official: Deltix key, community: TOFU) ->
+  // license enforcement -> import(). One bad addon never aborts the others
+  // or the control plane boot; see docs/decisions/0001-*.md.
+  //
+  // CRITICAL: must complete BEFORE Bun.serve() starts listening. Hono builds
+  // its route matcher eagerly on the first request, and adding routes after
+  // that moment throws "Can not add a route since the matcher is already
+  // built". A health check / reverse proxy probing the port during boot
+  // would otherwise permanently break HTTP addon route registration.
+  const addonsConfig = resolveLicenseAddonsConfig(result.license);
+  const addonCircuitBreaker = new AddonCircuitBreaker({
+    maxConsecutiveFailures: env.DELTIX_ADDON_MAX_CONSECUTIVE_FAILURES,
+    onDisabled: (addonName) => {
+      logger.error({ addonName }, 'Addon disabled after repeated runtime failures (until restart)');
+    },
+  });
+  const { loaded: loadedAddons, failures: addonFailures } = await discoverAndLoadAddons(
+    env.DELTIX_ADDON_PATHS,
+    {
+      officialPublicKey: env.DELTIX_LICENSE_PUBLIC_KEY,
+      trustStore: addonTrustStore,
+      addonsConfig,
+      freeOfficialAddons: env.DELTIX_ADDON_FREE_OFFICIAL.split(',')
+        .map((name) => name.trim())
+        .filter((name) => name.length > 0),
+      buildContext: (addonName, grantedCapabilities) => ({ addonName, grantedCapabilities }),
+    },
+  );
+  for (const failure of addonFailures) {
+    logger.error(
+      { addonDir: failure.addonDir, err: failure.error },
+      'Addon failed to load, skipping (control plane boot continues)',
+    );
+  }
+  for (const addon of loadedAddons) {
+    const grantedHttpRoute = addon.manifest.capabilities.includes('http:route');
+    if (grantedHttpRoute && typeof addon.module.activate === 'function') {
+      await addon.module.activate({
+        addonName: addon.manifest.name,
+        grantedCapabilities: addon.manifest.capabilities,
+        http: {
+          register: (path, handler) => {
+            app.all(path, async (c) =>
+              addonCircuitBreaker.wrap(addon.manifest.name, handler)(c.req.raw),
+            );
+          },
+        },
+      });
+    }
+  }
+  logger.info(
+    { loaded: loadedAddons.length, failed: addonFailures.length },
+    'Add-on loading complete',
+  );
+
   const httpPort = Number(Bun.env.HTTP_PORT ?? 9090);
   Bun.serve({
     port: httpPort,
@@ -231,56 +287,6 @@ async function main(): Promise<void> {
   logger.info(
     { port: grpcEngine.port },
     'gRPC transfer engine listening (TLS, Push/Pull/Heartbeat)',
-  );
-
-  // Add-on loading (Fase 4): fail-closed pipeline — manifest -> closed
-  // capability list -> signature (official: Deltix key, community: TOFU) ->
-  // license enforcement -> import(). One bad addon never aborts the others
-  // or the control plane boot; see docs/decisions/0001-*.md.
-  const addonsConfig = resolveLicenseAddonsConfig(result.license);
-  const addonCircuitBreaker = new AddonCircuitBreaker({
-    maxConsecutiveFailures: env.DELTIX_ADDON_MAX_CONSECUTIVE_FAILURES,
-    onDisabled: (addonName) => {
-      logger.error({ addonName }, 'Addon disabled after repeated runtime failures (until restart)');
-    },
-  });
-  const { loaded: loadedAddons, failures: addonFailures } = await discoverAndLoadAddons(
-    env.DELTIX_ADDON_PATHS,
-    {
-      officialPublicKey: env.DELTIX_LICENSE_PUBLIC_KEY,
-      trustStore: addonTrustStore,
-      addonsConfig,
-      freeOfficialAddons: env.DELTIX_ADDON_FREE_OFFICIAL.split(',')
-        .map((name) => name.trim())
-        .filter((name) => name.length > 0),
-      buildContext: (addonName, grantedCapabilities) => ({ addonName, grantedCapabilities }),
-    },
-  );
-  for (const failure of addonFailures) {
-    logger.error(
-      { addonDir: failure.addonDir, err: failure.error },
-      'Addon failed to load, skipping (control plane boot continues)',
-    );
-  }
-  for (const addon of loadedAddons) {
-    const grantedHttpRoute = addon.manifest.capabilities.includes('http:route');
-    if (grantedHttpRoute && typeof addon.module.activate === 'function') {
-      await addon.module.activate({
-        addonName: addon.manifest.name,
-        grantedCapabilities: addon.manifest.capabilities,
-        http: {
-          register: (path, handler) => {
-            app.all(path, async (c) =>
-              addonCircuitBreaker.wrap(addon.manifest.name, handler)(c.req.raw),
-            );
-          },
-        },
-      });
-    }
-  }
-  logger.info(
-    { loaded: loadedAddons.length, failed: addonFailures.length },
-    'Add-on loading complete',
   );
 }
 

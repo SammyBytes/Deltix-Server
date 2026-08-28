@@ -11,6 +11,7 @@ import {
   signLicensePayload,
 } from '../fixtures/license-fixtures';
 import { generateSelfSignedCert } from '../fixtures/tls-fixtures';
+import { waitForServerReady } from '../helpers/wait-for-server';
 
 const ENTRYPOINT = join(import.meta.dir, '..', '..', 'src', 'index.ts');
 
@@ -91,7 +92,7 @@ describe('versioning history boot smoke test', () => {
       stderr: 'pipe',
     });
 
-    await new Promise((resolve) => setTimeout(resolve, 1500));
+    await waitForServerReady(httpPort);
 
     try {
       const loginRes = await fetch(`http://127.0.0.1:${httpPort}/api/v1/auth/login`, {

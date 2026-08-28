@@ -14,6 +14,7 @@ import {
   signLicensePayload,
 } from '../fixtures/license-fixtures';
 import { generateSelfSignedCert } from '../fixtures/tls-fixtures';
+import { waitForServerReady } from '../helpers/wait-for-server';
 
 const ENTRYPOINT = join(import.meta.dir, '..', '..', 'src', 'index.ts');
 const PROTO_PATH = join(import.meta.dir, '..', '..', 'proto', 'transfer.proto');
@@ -133,9 +134,9 @@ describe('gRPC transfer engine boot smoke test (real subprocess, real TLS, real 
     });
 
     // gRPC bind (TLS cert load + server.start()) adds meaningfully more
-    // boot latency than the REST-only boot path — give it more headroom
-    // than the plain HTTP smoke tests to avoid a boot-time race.
-    await new Promise((resolve) => setTimeout(resolve, 1500));
+    // boot latency than the REST-only boot path — poll until ready instead
+    // of a fixed sleep so CI under load can never outrace the boot.
+    await waitForServerReady(httpPort);
 
     const loginRes = await fetch(`http://127.0.0.1:${httpPort}/api/v1/auth/login`, {
       method: 'POST',

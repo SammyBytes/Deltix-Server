@@ -9,6 +9,84 @@ Each entry starts with a **plain-language summary** (what changed, in
 everyday words) before any technical detail — written so someone outside
 engineering can understand what shipped and why it matters.
 
+## [0.6.1] - 2026-08-28
+
+**In plain terms:** this patch makes the Admin Web UI tell the truth about
+which version of Deltix is actually running — the little version tag in the
+login screen and the diagnostic/support bundle used to show the version of an
+older build even after you upgraded, which made it look like a reinstall had
+not worked. It also fixes three day-to-day annoyances: the small action
+buttons (edit user, copy token, and so on) could be invisible because their
+styling was never included in the downloaded stylesheet, the tables could
+stay empty right after a server restart until you happened to add or remove a
+user (they now automatically retry loading), and the server's own
+`--version` command printed an old version. Finally, a rare startup race is
+fixed: on a very fast restart, a monitoring probe could arrive before the
+server had finished wiring up its add-on routes, permanently breaking those
+add-ons for that process — add-ons are now fully registered before the server
+starts answering traffic.
+
+### Fixed
+
+- **Admin Web UI version badge is now dynamic.** The `#server-version-badge`
+  on the login page and `deltixVersion` in the support bundle previously read
+  a hardcoded `v0.5.4` string baked into the app; the release did not lie
+  about the binary version (boot logs, `/status`), but the UI did. Both now
+  fetch the real value from `/status` (`version`, `commit`, `nodeEnv`) via
+  `refreshServerVersion()` on load and fall back to `unknown` if the server
+  is unreachable, instead of a stale constant.
+- **`deltix-server --version` now reports the packaged version.** The CLI
+  version subcommand had a hardcoded `v0.5.4`; it now reads `package.json`
+  via `import ... with { type: 'json' }` (`src/cli/commands.ts`), matching the
+  boot `/status` value and fixing the supported `doctor`/ops output path.
+- **Admin UI action buttons can no longer be invisible.** Root cause: the
+  vendored `tailwind.css` was compiled with a content glob limited to `*.html`
+  (`build:css`/`watch:css` in `package.json`), so any utility class used only
+  inside `app.js` — `w-4`, `w-7`, `h-7`, `hover:text-amber-400`,
+  `hover:text-emerald-400`, `hover:text-red-400`, etc. — was never generated,
+  and buttons collapsed to 0×0. `src/styles/admin.css` now declares
+  `@source "../contexts/admin-ui/assets/**/*.{html,js}"`, both CSS scripts use
+  the `{html,js}` glob, and `tailwind.css` was regenerated (verified the
+  previously missing classes are present).
+- **Admin UI data now self-heals after a server restart.** The first load of
+  users/trusted addons/repos no longer fails silently forever when it races a
+  server that is still finishing boot: new `sleep()` + `fetchWithRetry()`
+  helpers (retries network errors and 5xx with exponential backoff, passthrough
+  otherwise) wrap `restoreSessionOnLoad`, `loadUsers`, `loadTrustedAddons`,
+  and `loadReposAndDirectory`. Before, the tables stayed error-empty until any
+  mutation happened to retrigger `loadUsers()` — the reported "users/repos only
+  appear after I add or delete one" bug.
+- **Add-on HTTP routes can no longer be lost to an early probe.** Real bug in
+  `src/index.ts`: `Bun.serve()` started listening before the add-on loading
+  block ran, and Hono's router builds its route matcher on the first request.
+  A health check / reverse proxy that hit the port during the (sub-second)
+  boot window threw `Can not add a route since the matcher is already built`
+  and permanently disabled those add-ons for that process. The add-on
+  discovery/activation block now runs before `Bun.serve()` (comment marked
+  "CRITICAL" in `src/index.ts`).
+- **Smoke test flakiness removed (HANDOFF §11.3).** The smoke tests that
+  booted a real server no longer rely on fixed ~800–1500ms sleeps before the
+  first fetch (which failed with `ConnectionRefused` under CI/load). New shared
+  helper `tests/helpers/wait-for-server.ts` (`waitForServerReady`) polls
+  `/status` with a 15s deadline; applied to `auth-boot`, `storage-boot`,
+  `addons-boot`, `boot`, `transfer-boot`, `grpc-transfer-boot`,
+  `versioning-boot`, `versioning-merge-boot`, `versioning-history-boot`,
+  `versioning-branching-boot`, `versioning-push-commit-boot`.
+
+### Tests
+
+- Full suite re-run and green: **259 unit + 214 integration + 34 smoke tests,
+  0 failures**, plus `bun run lint` clean (only pre-existing warnings in
+  `scripts/generate-server-tls-cert.ts`).
+- Addon boot fix proven end-to-end: a real signed addon with an `http:route`
+  now returns 200 via `authenticated fetch` even when `/status` is polled
+  eagerly during boot (before the fix this reproduced
+  `Can not add a route since the matcher is already built` deterministically).
+- UI fixes verified by CSS inspection of the regenerated `tailwind.css`
+  (previously missing classes now present) and by parsing `app.js` with
+  `node --check`; the `--version` CLI path is covered by
+  `tests/unit/cli/commands.test.ts`, which asserts `runCli(['bun','deltix','--version'])`.
+
 ## [0.6.0] - 2026-08-28
 
 **In plain terms:** Deltix-Client can now confirm it is talking to the right

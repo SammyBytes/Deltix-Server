@@ -11,6 +11,7 @@ import {
   signLicensePayload,
 } from '../fixtures/license-fixtures';
 import { generateSelfSignedCert } from '../fixtures/tls-fixtures';
+import { waitForServerReady } from '../helpers/wait-for-server';
 
 const ENTRYPOINT = join(import.meta.dir, '..', '..', 'src', 'index.ts');
 
@@ -121,7 +122,7 @@ describe('boot smoke test (real subprocess, real dolt repo)', () => {
     });
 
     try {
-      await new Promise((resolve) => setTimeout(resolve, 1500));
+      await waitForServerReady(httpPort);
       const response = await fetch(`http://127.0.0.1:${httpPort}/status`);
       expect(response.status).toBe(200);
       const body = await response.json();

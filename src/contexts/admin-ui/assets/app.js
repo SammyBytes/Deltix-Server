@@ -191,6 +191,32 @@ function authHeaders() {
   return accessToken ? { authorization: 'Bearer ' + accessToken } : {};
 }
 
+function sleep(ms) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+// Resilient fetch for the initial page/data loads. The server may briefly
+// be unreachable right after a (re)start while libSQL/session stores warm up,
+// so network errors and 5xx responses are retried with a short backoff. Any
+// HTTP status < 500 (e.g. a 401 for a truly expired session) is returned as-is
+// in the final attempt so callers keep their existing error handling.
+async function fetchWithRetry(input, init, retries, baseDelayMs) {
+  const maxAttempts = Math.max(1, Number.isFinite(retries) ? retries : 3);
+  const delayMs = Math.max(100, Number.isFinite(baseDelayMs) ? baseDelayMs : 500);
+  for (let attempt = 1; ; attempt++) {
+    let res;
+    try {
+      res = await fetch(input, init);
+    } catch (err) {
+      if (attempt >= maxAttempts) throw err;
+      await sleep(delayMs * attempt);
+      continue;
+    }
+    if (res.ok || res.status < 500 || attempt >= maxAttempts) return res;
+    await sleep(delayMs * attempt);
+  }
+}
+
 function cssSafe(value) {
   return value.replace(/[^a-zA-Z0-9-]/g, '-');
 }
@@ -326,7 +352,7 @@ if (logoutButton) {
 async function loadReposAndDirectory() {
   if (!accessToken) return;
   try {
-    const res = await fetch('/api/v1/versioning/repos', { headers: authHeaders(), cache: 'no-store' });
+    const res = await fetchWithRetry('/api/v1/versioning/repos', { headers: authHeaders(), cache: 'no-store' });
     if (!res.ok) {
       if (rolesRepoSelect) rolesRepoSelect.innerHTML = '<option value="">Failed to load repositories</option>';
       if (reposTableBody) renderTableLoadError(reposTableBody, 4, 'repositories');
@@ -541,7 +567,7 @@ async function revokeRepoRole(username) {
 async function loadUsers() {
   if (!userList || !accessToken) return;
   try {
-    const res = await fetch('/api/v1/auth/users', { headers: authHeaders(), cache: 'no-store' });
+    const res = await fetchWithRetry('/api/v1/auth/users', { headers: authHeaders(), cache: 'no-store' });
     if (!res.ok) {
       renderTableLoadError(userList, 7, 'users');
       return;
@@ -743,7 +769,7 @@ if (userCreateForm) {
 async function loadTrustedAddons() {
   if (!trustList || !accessToken) return;
   try {
-    const res = await fetch('/api/v1/addons/trust', { headers: authHeaders(), cache: 'no-store' });
+    const res = await fetchWithRetry('/api/v1/addons/trust', { headers: authHeaders(), cache: 'no-store' });
     if (!res.ok) {
       renderTableLoadError(trustList, 5, 'trusted addons');
       return;
@@ -840,7 +866,7 @@ if (trustForm) {
 if (copySupportBundleBtn) {
   copySupportBundleBtn.addEventListener('click', async () => {
     const bundle = {
-      deltixVersion: 'v0.5.4',
+      deltixVersion: serverVersion || 'unknown',
       timestamp: new Date().toISOString(),
       user: currentUsername,
       isGlobalAdmin: currentIsGlobalAdmin,
@@ -895,6 +921,34 @@ if (setupForm) {
     }
   });
 }
+
+// ==================== VERSION BADGE ====================
+
+// Fills the `#server-version-badge` span and the support bundle with the
+// real server version from the public, unauthenticated /status endpoint
+// instead of a hardcoded string that drifts out of date on every release.
+// The /status response shape is { version, commit, nodeEnv } (see
+// src/shared/build-info.ts).
+let serverVersion = null;
+
+async function refreshServerVersion() {
+  const badge = document.getElementById('server-version-badge');
+  if (!badge) return;
+  try {
+    const res = await fetch('/status', { cache: 'no-store' });
+    if (!res.ok) return;
+    const info = await res.json();
+    if (info.version) {
+      serverVersion = 'v' + info.version;
+      badge.textContent = serverVersion;
+      badge.title = 'Commit ' + (info.commit || 'unknown');
+    }
+  } catch {
+    // server may still be booting; leave the placeholder in place
+  }
+}
+
+refreshServerVersion();
 
 // ==================== TOURS & SESSION RESTORATION ====================
 
@@ -962,7 +1016,11 @@ async function restoreSessionOnLoad() {
     return;
   }
   try {
-    const res = await fetch('/api/v1/auth/refresh', {
+    // Gate: the server may still be booting right after a restart, so a
+    // transient refresh failure must not strand the operator on the login
+    // screen permanently. fetchWithRetry retries network/5xx errors; a
+    // genuine 401 (no valid session cookie) returns immediately.
+    const res = await fetchWithRetry('/api/v1/auth/refresh', {
       method: 'POST',
       credentials: 'include',
     });

@@ -9,6 +9,7 @@ import { Database } from 'bun:sqlite';
 import { existsSync, statfsSync, writeFileSync } from 'node:fs';
 import { arch, cpus, freemem, platform, totalmem, uptime } from 'node:os';
 import { join, resolve } from 'node:path';
+import packageJson from '../../package.json' with { type: 'json' };
 import {
   checkDirectoryPermissions,
   checkPortAvailable,
@@ -883,7 +884,7 @@ export async function runCli(argv: string[]): Promise<number> {
   }
 
   if (command === '--version' || command === '-v' || command === 'version') {
-    console.log(`deltix-server v0.5.4 (Bun ${Bun.version})`);
+    console.log(`deltix-server v${packageJson.version} (Bun ${Bun.version})`);
     return 0;
   }
 

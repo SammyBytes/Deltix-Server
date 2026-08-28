@@ -12,8 +12,11 @@ the whole page silently rendered unstyled/broken in that environment.
 ## Regenerating `tailwind.css`
 
 Only needed after adding new Tailwind utility classes to `login.html` /
-`setup.html`. Uses the official standalone Tailwind CLI (no Node
-build toolchain required):
+`setup.html` **or** to the runtime-injected class strings in `app.js`
+(icon buttons, status badges, audit-log items). The content glob therefore
+covers both `.html` and `.js` files — a build that scans only the HTML
+silently drops every class that lives exclusively in `app.js`. Uses the
+official standalone Tailwind CLI (no Node build toolchain required):
 
 ```bash
 curl -sSL -o /tmp/tailwindcss-cli \
@@ -23,7 +26,7 @@ echo '@import "tailwindcss";' > /tmp/tailwind-input.css
 /tmp/tailwindcss-cli \
   --input /tmp/tailwind-input.css \
   --output src/contexts/admin-ui/assets/vendor/tailwind.css \
-  --content "src/contexts/admin-ui/assets/*.html" \
+  --content "src/contexts/admin-ui/assets/**/*.{html,js}" \
   --minify
 ```
 

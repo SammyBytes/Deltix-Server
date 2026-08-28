@@ -1,6 +1,6 @@
 {
   "name": "deltix-server",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "private": true,
   "license": "BUSL-1.1",
   "type": "module",
@@ -11,8 +11,8 @@
   "scripts": {
     "dev": "bun run src/index.ts",
     "build": "bun build ./src/index.ts --compile --outfile dist/deltix-server",
-    "build:css": "bunx @tailwindcss/cli -i src/styles/admin.css -o src/contexts/admin-ui/assets/vendor/tailwind.css --content 'src/contexts/admin-ui/assets/**/*.html' --minify",
-    "watch:css": "bunx @tailwindcss/cli -i src/styles/admin.css -o src/contexts/admin-ui/assets/vendor/tailwind.css --content 'src/contexts/admin-ui/assets/**/*.html' --watch",
+    "build:css": "bunx @tailwindcss/cli -i src/styles/admin.css -o src/contexts/admin-ui/assets/vendor/tailwind.css --content 'src/contexts/admin-ui/assets/**/*.{html,js}' --minify",
+    "watch:css": "bunx @tailwindcss/cli -i src/styles/admin.css -o src/contexts/admin-ui/assets/vendor/tailwind.css --content 'src/contexts/admin-ui/assets/**/*.{html,js}' --watch",
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
     "test": "bun test",

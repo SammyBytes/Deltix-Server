@@ -4,6 +4,13 @@
  */
 @import "tailwindcss";
 
+/* Scan the Admin UI templates and the runtime-injected class strings in
+ * app.js (icon buttons, status badges, audit log items, etc.). Without the
+ * `.js` source the build only knows the classes that appear in the HTML, so
+ * the action buttons and dynamic UI state classes end up missing from the
+ * compiled CSS entirely -- invisible controls / unstyled rows. */
+@source "../contexts/admin-ui/assets/**/*.{html,js}";
+
 /* ── Monochromatic design tokens ─────────────────────────────────────────── */
 @layer base {
   * {
