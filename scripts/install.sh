@@ -219,6 +219,43 @@ TLS_HOSTNAME="${TLS_HOSTNAME:-}"
 TLS_CERT_PATH="${TLS_CERT_PATH:-}"
 TLS_KEY_PATH="${TLS_KEY_PATH:-}"
 
+# ------------------------------------------------------------------------------
+# Persisted TLS choice — so an upgrade re-run does not ask for the certificate
+# paths all over again. The first time TLS credentials are configured we write
+# a small state file ($CONFIG_DIR/.tls-state) recording the mode and the cert
+# paths. On later runs the wizard can offer those same paths as the default,
+# avoiding the manual path re-entry on every update.
+# ------------------------------------------------------------------------------
+TLS_STATE_FILE="${CONFIG_DIR}/.tls-state"
+declare -A PREV_TLS
+load_tls_state() {
+  PREV_TLS=()
+  if [ -f "${TLS_STATE_FILE}" ]; then
+    # shellcheck disable=SC2155
+    local mode; mode="$(sed -n 's/^TLS_MODE=//p' "${TLS_STATE_FILE}" 2>/dev/null | head -n1)"
+    local cert; cert="$(sed -n 's/^TLS_CERT_PATH=//p' "${TLS_STATE_FILE}" 2>/dev/null | head -n1)"
+    local key; key="$(sed -n 's/^TLS_KEY_PATH=//p' "${TLS_STATE_FILE}" 2>/dev/null | head -n1)"
+    local host; host="$(sed -n 's/^TLS_HOSTNAME=//p' "${TLS_STATE_FILE}" 2>/dev/null | head -n1)"
+    [ -n "${mode}" ] && PREV_TLS[mode]="${mode}"
+    [ -n "${host}" ] && PREV_TLS[hostname]="${host}"
+    [ -n "${cert}" ] && PREV_TLS[cert]="${cert}"
+    [ -n "${key}" ] && PREV_TLS[key]="${key}"
+  fi
+}
+
+# Leave the persisted choice as-is by default on upgrades, so re-running the
+# installer never silently tears down an existing TLS setup. Only an explicit
+# user (or env-var) selection overrides it.
+if [ -f "${TLS_STATE_FILE}" ]; then
+  load_tls_state
+  if [ -z "${TLS_MODE}" ] || [ "${TLS_MODE}" = "none" ]; then
+    TLS_MODE="${PREV_TLS[mode]:-none}"
+  fi
+  [ -n "${PREV_TLS[hostname]}" ] && TLS_HOSTNAME="${TLS_HOSTNAME:-${PREV_TLS[hostname]}}"
+  [ -n "${PREV_TLS[cert]}" ] && TLS_CERT_PATH="${TLS_CERT_PATH:-${PREV_TLS[cert]}}"
+  [ -n "${PREV_TLS[key]}" ] && TLS_KEY_PATH="${TLS_KEY_PATH:-${PREV_TLS[key]}}"
+fi
+
 if [ "${UNATTENDED}" != "true" ]; then
   echo ""
   echo "=================================================================="
@@ -232,19 +269,52 @@ if [ "${UNATTENDED}" != "true" ]; then
 
   echo ""
   echo "TLS for the HTTP control plane and Admin Web UI:"
+  if [ -n "${TLS_CERT_PATH}" ] && [ -n "${TLS_KEY_PATH}" ]; then
+    echo "  (Previously used certificate paths are remembered)"
+  fi
   echo "  1) None — plain HTTP (fine behind a reverse proxy that already terminates TLS)"
   echo "  2) Self-signed certificate — generated now for a hostname or IP you provide"
   echo "  3) Existing certificate — point at a cert/key you already have"
-  read -rp "Choose [1]: " ANSWER
-  case "${ANSWER:-1}" in
+  TLS_OPT_DEFAULT="${TLS_MODE}"
+  case "${TLS_OPT_DEFAULT}" in
+    self-signed) TLS_OPT_DEFAULT="2" ;;
+    existing) TLS_OPT_DEFAULT="3" ;;
+    *) TLS_OPT_DEFAULT="1" ;;
+  esac
+  read -rp "Choose [${TLS_OPT_DEFAULT}]: " ANSWER
+  case "${ANSWER:-${TLS_OPT_DEFAULT}}" in
     2)
       TLS_MODE="self-signed"
-      read -rp "Hostname or IP this server will be reached at: " TLS_HOSTNAME
+      if [ -n "${TLS_HOSTNAME}" ]; then
+        read -rp "Hostname or IP this server will be reached at [${TLS_HOSTNAME}]: " ANSWER
+        TLS_HOSTNAME="${ANSWER:-${TLS_HOSTNAME}}"
+      else
+        read -rp "Hostname or IP this server will be reached at: " TLS_HOSTNAME
+      fi
       ;;
     3)
       TLS_MODE="existing"
-      read -rp "Path to certificate file (.crt/.pem): " TLS_CERT_PATH
-      read -rp "Path to private key file (.key/.pem): " TLS_KEY_PATH
+      if [ -n "${TLS_CERT_PATH}" ] && [ -n "${TLS_KEY_PATH}" ]; then
+        echo "  Reusing previously configured certificate credentials:"
+        echo "    Cert: ${TLS_CERT_PATH}"
+        echo "    Key : ${TLS_KEY_PATH}"
+        read -rp "Reuse these paths, or enter new ones? [r/N]: " ANSWER
+        case "${ANSWER:-n}" in
+          r|R|reuse|Reuse|yes|Yes|y|Y)
+            TLS_CERT_PATH="${PREV_TLS[cert]}"
+            TLS_KEY_PATH="${PREV_TLS[key]}"
+            ;;
+          *)
+            read -rp "Path to certificate file (.crt/.pem) [${TLS_CERT_PATH}]: " CERT_ANSWER
+            TLS_CERT_PATH="${CERT_ANSWER:-${TLS_CERT_PATH}}"
+            read -rp "Path to private key file (.key/.pem) [${TLS_KEY_PATH}]: " KEY_ANSWER
+            TLS_KEY_PATH="${KEY_ANSWER:-${TLS_KEY_PATH}}"
+            ;;
+        esac
+      else
+        read -rp "Path to certificate file (.crt/.pem): " TLS_CERT_PATH
+        read -rp "Path to private key file (.key/.pem): " TLS_KEY_PATH
+      fi
       ;;
     *)
       TLS_MODE="none"
@@ -357,6 +427,22 @@ if [ "${TLS_MODE}" = "self-signed" ]; then
 elif [ "${TLS_MODE}" = "existing" ]; then
   RESOLVED_TLS_CERT_PATH="${TLS_CERT_PATH}"
   RESOLVED_TLS_KEY_PATH="${TLS_KEY_PATH}"
+fi
+
+# Persist the chosen TLS mode and certificate paths so the next install/upgrade
+# run can offer them back as the default instead of prompting for the paths
+# again. Only written when TLS credentials were actually configured.
+if [ "${TLS_MODE}" != "none" ]; then
+  {
+    echo "# Deltix TLS state -- written by scripts/install.sh, read on the next run"
+    echo "# to offer previously used certificate paths (so upgrades don't re-prompt)."
+    echo "TLS_MODE=${TLS_MODE}"
+    [ -n "${TLS_HOSTNAME}" ] && echo "TLS_HOSTNAME=${TLS_HOSTNAME}"
+    [ -n "${RESOLVED_TLS_CERT_PATH}" ] && echo "TLS_CERT_PATH=${RESOLVED_TLS_CERT_PATH}"
+    [ -n "${RESOLVED_TLS_KEY_PATH}" ] && echo "TLS_KEY_PATH=${RESOLVED_TLS_KEY_PATH}"
+  } > "${TLS_STATE_FILE}"
+  chmod 640 "${TLS_STATE_FILE}"
+  chown "${SERVICE_USER}:${SERVICE_GROUP}" "${TLS_STATE_FILE}"
 fi
 
 # ------------------------------------------------------------------------------

@@ -9,6 +9,46 @@ Each entry starts with a **plain-language summary** (what changed, in
 everyday words) before any technical detail — written so someone outside
 engineering can understand what shipped and why it matters.
 
+## [0.6.11] - 2026-08-28
+
+**In plain terms:** upgrading the server no longer makes you re-type your
+TLS certificate paths every single time. If you already configured a
+certificate once (either your own files or one the installer generated), the
+installer remembers those paths and, on the next upgrade, asks if you want to
+just reuse what's already there instead of entering the full paths by hand
+again. The remembered paths are shown in plain sight so you can confirm or
+change them in one step.
+
+### Added
+
+- **TLS certificate paths persist across upgrades**: `scripts/install.sh`
+  now writes a small state file (`/etc/deltix/.tls-state`) when TLS
+  credentials are configured — recording the TLS mode (self-signed or
+  existing) and the certificate/key paths (and, for self-signed, the
+  hostname/IP). On the next run the installer loads that state and offers the
+  previously used paths as the default.
+- **Interactive wizard offers to reuse remembered credentials**: when you
+  choose "Existing certificate" (option 3) on a machine that already has a
+  saved configuration, the wizard now shows the remembered cert and key paths
+  and asks "Reuse these paths, or enter new ones?" — pressing `r` (or Enter
+  on the now-defaulted option) reuses them. No more retyping absolute paths
+  on every update. For self-signed setups, the remembered hostname/IP is also
+  offered as the default.
+- **Upgrade-safe defaults**: if a TLS mode was already persisted, re-running
+  the installer keeps it as the default for the "Choose" prompt instead of
+  silently defaulting back to plain HTTP, so an upgrade can never accidentally
+  tear down an existing HTTPS setup. Explicitly choosing another option (or an
+  env var like `TLS_MODE`) still overrides it, and unattended runs pick up the
+  saved paths automatically without prompting.
+
+### Tests
+
+- Validated the new state logic with an isolated harness: empty state falls
+  back to `none`; writing and reloading the state file preserves mode, cert
+  and key paths (and hostname); the "reuse" branch restores the remembered
+  paths; and `TLS_MODE=none` never writes a state file. `install.sh` and
+  `get-deltix.sh` pass `bash -n` after the change.
+
 ## [0.6.10] - 2026-08-28
 
 **In plain terms:** two Admin Web UI issues are fixed here. First, the
