@@ -840,7 +840,7 @@ if (trustForm) {
 if (copySupportBundleBtn) {
   copySupportBundleBtn.addEventListener('click', async () => {
     const bundle = {
-      deltixVersion: 'v0.5.0',
+      deltixVersion: 'v0.5.1',
       timestamp: new Date().toISOString(),
       user: currentUsername,
       isGlobalAdmin: currentIsGlobalAdmin,

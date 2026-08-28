@@ -883,7 +883,7 @@ export async function runCli(argv: string[]): Promise<number> {
   }
 
   if (command === '--version' || command === '-v' || command === 'version') {
-    console.log(`deltix-server v0.5.0 (Bun ${Bun.version})`);
+    console.log(`deltix-server v0.5.1 (Bun ${Bun.version})`);
     return 0;
   }
 

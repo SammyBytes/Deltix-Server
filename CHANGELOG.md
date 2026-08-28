@@ -9,6 +9,44 @@ Each entry starts with a **plain-language summary** (what changed, in
 everyday words) before any technical detail — written so someone outside
 engineering can understand what shipped and why it matters.
 
+## [0.5.1] - 2026-08-28
+
+**In plain terms:** you no longer have to `git clone` the repository or
+know the exact GitHub archive URL to install Deltix-Server. Every release
+now ships a ready-to-use source package, and a single copy-pasteable
+command downloads and installs it end to end — the same pattern tools
+like Docker and rustup use. This release also fixes a CI/CD bug from the
+last release that could leave a GitHub Release incomplete.
+
+### Added
+
+- `scripts/get-deltix.sh`: a one-line bootstrap installer. Run
+  `curl -fsSL .../get-deltix.sh | sudo bash` on a clean machine and it
+  resolves the latest release (or a pinned `VERSION=`), downloads the
+  source tarball, and runs `scripts/install.sh` automatically. Falls
+  back to an unattended install when piped (stdin isn't a real
+  terminal in that case); documented the download-then-run alternative
+  for the interactive wizard.
+- CD now packages the tagged source tree into
+  `deltix-server-<version>.tar.gz` (application code only, no
+  `node_modules`) and attaches it to the GitHub Release as a real,
+  documented download target.
+- `INSTALL.md`: documented the one-line bootstrap as the recommended
+  install path, alongside the existing `git clone` / direct-download
+  alternatives.
+
+### Fixed
+
+- Corrected `INSTALL.md`'s prior "download or clone the release"
+  instruction, which pointed at an asset that didn't actually exist on
+  the GitHub Release.
+
+### Tests
+
+- This release's tag push is the first real exercise of the CD pipeline
+  fix from 0.5.0 (dedicated `ensure-release` job + `fail-fast: false` on
+  the TLS cert-tool matrix), and of the new tarball-packaging job.
+
 ## [0.5.0] - 2026-08-28
 
 **In plain terms:** installing Deltix-Server on a real machine (not
