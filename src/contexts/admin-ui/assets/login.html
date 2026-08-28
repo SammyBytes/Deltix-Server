@@ -99,13 +99,13 @@
         <button type="button" data-target="tab-dashboard" class="nav-tab active px-3.5 py-2 rounded-lg text-xs font-medium text-neutral-400 hover:text-neutral-200 border border-transparent">
           Dashboard
         </button>
-        <button type="button" data-target="tab-repos" class="nav-tab px-3.5 py-2 rounded-lg text-xs font-medium text-neutral-400 hover:text-neutral-200 border border-transparent">
+        <button type="button" data-target="tab-repos" id="repos-nav-link" class="nav-tab px-3.5 py-2 rounded-lg text-xs font-medium text-neutral-400 hover:text-neutral-200 border border-transparent">
           Repositories & Roles
         </button>
         <button type="button" data-target="tab-users" id="users-nav-link" class="nav-tab px-3.5 py-2 rounded-lg text-xs font-medium text-neutral-400 hover:text-neutral-200 border border-transparent">
           User Management
         </button>
-        <button type="button" data-target="tab-addons" class="nav-tab px-3.5 py-2 rounded-lg text-xs font-medium text-neutral-400 hover:text-neutral-200 border border-transparent">
+        <button type="button" data-target="tab-addons" id="addons-nav-link" class="nav-tab px-3.5 py-2 rounded-lg text-xs font-medium text-neutral-400 hover:text-neutral-200 border border-transparent">
           Community Add-ons
         </button>
         <button type="button" data-target="tab-audit" class="nav-tab px-3.5 py-2 rounded-lg text-xs font-medium text-neutral-400 hover:text-neutral-200 border border-transparent">
@@ -113,8 +113,12 @@
         </button>
       </nav>
 
-      <!-- Tab panel — view-transition-name enables CSS View Transitions on tab switch -->
-      <div id="tab-panel" style="view-transition-name: tab-panel;">
+      <!-- Tab panel. No view-transition-name here: session-panel starts
+           display:none on login, and naming this panel makes Chromium capture
+           a zero-sized/blank snapshot during the login cross-fade (visual
+           glitch). The page-level document.startViewTransition() still fades
+           cleanly as a single root group. -->
+      <div id="tab-panel">
 
       <!-- ==================== TAB 1: DASHBOARD ==================== -->
       <section id="tab-dashboard" class="tab-content active space-y-6 mt-6">

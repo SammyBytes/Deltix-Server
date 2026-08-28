@@ -118,12 +118,16 @@ function withViewTransition(mutate) {
       if (transition && transition.ready && typeof transition.ready.catch === 'function') {
         transition.ready.catch(() => {});
       }
+      // Resolve once the transition is done (or skipped) so callers can defer
+      // follow-up work until the updated DOM is actually visible on screen.
+      return Promise.resolve(finished).catch(() => {});
     } catch {
       mutate();
+      return Promise.resolve();
     }
-  } else {
-    mutate();
   }
+  mutate();
+  return Promise.resolve();
 }
 
 function showToast(message, isError) {
@@ -287,6 +291,11 @@ function applyGlobalAdminGating() {
   show(rolesScreen, currentIsGlobalAdmin);
   show(addonsScreen, currentIsGlobalAdmin);
   show(notAdminNotice, !currentIsGlobalAdmin);
+  // Hide the admin-only navigation tabs entirely for non-global-admins, so a
+  // standard operator never lands on a blank panel for a restricted screen.
+  show(document.getElementById('repos-nav-link'), currentIsGlobalAdmin);
+  show(document.getElementById('users-nav-link'), currentIsGlobalAdmin);
+  show(document.getElementById('addons-nav-link'), currentIsGlobalAdmin);
 }
 
 function showSession(username, isGlobalAdmin) {
@@ -302,6 +311,18 @@ function showSession(username, isGlobalAdmin) {
     if (sessionPanel) sessionPanel.classList.remove('hidden');
     if (sessionUsername) sessionUsername.textContent = username;
     applyGlobalAdminGating();
+  }).then(() => {
+    // Onboarding tours only once the session panel is actually on screen:
+    // running them while Chromium defers the view-transition callback pointed
+    // the tour highlights at elements that were still hidden behind the login
+    // view, which rendered as a visual glitch on first login.
+    runNonCritical(() => maybeRunDashboardTour());
+    runNonCritical(() => {
+      if (currentIsGlobalAdmin) {
+        maybeRunAddonsTour();
+        maybeRunUsersTour();
+      }
+    });
   });
   logAuditEvent('Session authenticated', { username: username, isGlobalAdmin: currentIsGlobalAdmin });
 
@@ -324,13 +345,8 @@ function showSession(username, isGlobalAdmin) {
     void loadReposAndDirectory();
   }
 
-  runNonCritical(() => maybeRunDashboardTour());
-  runNonCritical(() => {
-    if (currentIsGlobalAdmin) {
-      maybeRunAddonsTour();
-      maybeRunUsersTour();
-    }
-  });
+  // Keep the active-session / dashboard tiles live while the session is open.
+  startLiveRefresh();
 }
 
 // Wraps cosmetic/side-effect work (onboarding tours, etc.) so a runtime error
@@ -343,10 +359,47 @@ function runNonCritical(task) {
   }
 }
 
+// ==================== LIVE REFRESH ====================
+// While a session is open the dashboard/user data are a live view of the
+// server: seat usage, last logins and active sessions change when other
+// operators sign in/out, so the UI re-fetches periodically and whenever the
+// tab regains focus. Stopped on logout so nothing keeps polling a closed
+// session.
+
+let liveRefreshTimer = null;
+
+function refreshDashboardTiles() {
+  if (!currentIsGlobalAdmin || !accessToken) return;
+  void loadUsers();
+  void loadTrustedAddons();
+  void loadReposAndDirectory();
+}
+
+function startLiveRefresh() {
+  stopLiveRefresh();
+  refreshDashboardTiles();
+  liveRefreshTimer = window.setInterval(refreshDashboardTiles, 15000);
+}
+
+function stopLiveRefresh() {
+  if (liveRefreshTimer) {
+    window.clearInterval(liveRefreshTimer);
+    liveRefreshTimer = null;
+  }
+}
+
+window.addEventListener('focus', refreshDashboardTiles);
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) refreshDashboardTiles();
+});
+
+// ==================== LOGIN / LOGOUT ====================
+
 function showForm() {
   currentUsername = null;
   currentIsGlobalAdmin = false;
   accessToken = null;
+  stopLiveRefresh();
   withViewTransition(() => {
     if (sessionPanel) sessionPanel.classList.add('hidden');
     if (loginView) loginView.classList.remove('hidden');

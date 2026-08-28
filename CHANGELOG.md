@@ -9,6 +9,59 @@ Each entry starts with a **plain-language summary** (what changed, in
 everyday words) before any technical detail — written so someone outside
 engineering can understand what shipped and why it matters.
 
+## [0.6.10] - 2026-08-28
+
+**In plain terms:** two Admin Web UI issues are fixed here. First, the
+"active sessions" and seat counters were only a snapshot from when you logged
+in (or last did an action) — if someone else signed in or out, the numbers
+stayed stale until you reloaded. The dashboard now refreshes those numbers
+on its own every few seconds and whenever the browser tab regains focus.
+Second, accounts that are not global administrators could see visual glitches
+on the dashboard: a broken cross-fade animation right after signing in, and
+navigation tabs for restricted admin screens that, when clicked, showed blank
+panels. The glitchy animation source was removed and, for regular accounts,
+the admin-only tabs are now hidden entirely — they only see what they can
+actually use.
+
+### Fixed
+
+- **Active-session counters stayed stale until the next action/reload**:
+  `user.activeSessions`, the seat usage indicator and the dashboard tiles
+  (`Users & Active Seats`, repos, add-ons) were only fetched on login or after
+  a write action. A new `startLiveRefresh()` mechanism re-fetches
+  `loadUsers`/`loadTrustedAddons`/`loadReposAndDirectory` every 15 seconds
+  while a session is open, and immediately when the browser tab regains focus
+  or becomes visible again — so other operators' logins/logouts show up in
+  near real time. It stops on logout (`showForm`) so nothing polls a closed
+  session.
+- **Visual glitch on login from the CSS view transition**: `#tab-panel` had
+  `view-transition-name: tab-panel`. Because `#session-panel` starts
+  `display:none` on the login screen, Chromium had to capture the named panel
+  while it had no rendered box, which produced broken/blank snapshots during
+  the login cross-fade. The inline `view-transition-name` was removed; the
+  page-level fade still runs cleanly as a single root group.
+- **Onboarding tour highlights pointed at hidden elements on first login**: the
+  dashboard/add-ons/users tours ran synchronously in `showSession()` — i.e.
+  possibly before Chromium's one-frame-deferred view-transition callback had
+  revealed the session panel — so the tour overlay anchored to elements that
+  were still hidden and rendered as a glitch. Tours are now scheduled only
+  after the view transition finishes (`withViewTransition` returns a promise).
+- **Regular (non-global-admin) accounts saw admin-only tabs that led to blank
+  panels**: the "Repositories & Roles", "User Management" and "Community
+  Add-ons" nav buttons stayed visible even though the underlying screens were
+  gated off. `applyGlobalAdminGating()` now also hides those three nav buttons
+  for non-admins (plus the "Standard Operator Session" notice), leaving only
+  the tabs they can actually use.
+
+### Tests
+
+- Extended `tests/unit/admin-ui/app-data-load.test.ts`: asserts a 15s live-refresh
+  interval is installed on login and re-fetches the user list on each tick, and
+  that the admin-only nav tabs are hidden for non-admins but visible for global
+  admins (with the operator notice shown/hidden accordingly). Runs the real
+  `app.js` through the deferred view-transition DOM harness. Suite: 264 pass /
+  0 fail; lint clean for the changed test file.
+
 ## [0.6.9] - 2026-08-28
 
 **In plain terms:** the previous fix for the empty-tables-after-login bug

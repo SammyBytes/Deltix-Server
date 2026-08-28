@@ -57,8 +57,13 @@ function makeElement(id = '') {
   return el;
 }
 
-function loadUiHarness(appJsPath: string, deferStartViewTransition: boolean) {
+function loadUiHarness(
+  appJsPath: string,
+  deferStartViewTransition: boolean,
+  options?: { isGlobalAdmin?: boolean },
+) {
   const calls: string[] = [];
+  const intervals: Array<{ fn: () => void; delay: number }> = [];
   const elements = new Map<string, ReturnType<typeof makeElement>>();
 
   const ids = [
@@ -102,6 +107,9 @@ function loadUiHarness(appJsPath: string, deferStartViewTransition: boolean) {
     'dash-addons-count',
     'audit-log-container',
     'copy-support-bundle-btn',
+    'repos-nav-link',
+    'users-nav-link',
+    'addons-nav-link',
   ];
   for (const id of ids) elements.set(id, makeElement(id));
 
@@ -161,6 +169,8 @@ function loadUiHarness(appJsPath: string, deferStartViewTransition: boolean) {
       return el;
     },
     startViewTransition,
+    addEventListener: () => {},
+    hidden: false,
   };
 
   const fetchMock = async (url: string | URL, opts?: { method?: string }) => {
@@ -175,13 +185,23 @@ function loadUiHarness(appJsPath: string, deferStartViewTransition: boolean) {
     });
     const deny = { ok: false, status: 401, json: async () => ({}), text: async () => 'denied' };
     if (s.includes('/api/v1/auth/login'))
-      return ok({ accessToken: 'tok', username: 'hemiblade', isGlobalAdmin: true });
+      return ok({
+        accessToken: 'tok',
+        username: 'hemiblade',
+        isGlobalAdmin: options?.isGlobalAdmin ?? true,
+      });
     if (s.includes('/api/v1/auth/refresh')) return deny;
     if (s.includes('/api/v1/auth/logout')) return ok({});
     if (s.includes('/api/v1/auth/users')) return ok({ users: [] });
     if (s.includes('/api/v1/addons/trust')) return ok({ addons: [] });
     if (s.includes('/api/v1/versioning/repos')) return ok({ repositories: [] });
     return ok({});
+  };
+
+  let intervalSeq = 1;
+  const setIntervalStub = (fn: unknown, delay: number) => {
+    intervals.push({ fn: fn as () => void, delay });
+    return intervalSeq++;
   };
 
   const context: Record<string, unknown> = {
@@ -195,6 +215,10 @@ function loadUiHarness(appJsPath: string, deferStartViewTransition: boolean) {
   };
   context.window = {
     setTimeout,
+    clearTimeout,
+    setInterval: setIntervalStub,
+    clearInterval: () => {},
+    addEventListener: () => {},
     location,
     driver: undefined,
     fetch: fetchMock,
@@ -206,9 +230,11 @@ function loadUiHarness(appJsPath: string, deferStartViewTransition: boolean) {
 
   return {
     calls,
+    intervals,
     loginForm: context.__uiForm as Parameters<typeof makeElement>[0] & {
       _listeners: Record<string, unknown>;
     },
+    getEl: (id: string) => elements.get(id) || null,
   };
 }
 
@@ -233,5 +259,48 @@ describe('admin-ui/app.js initial data load after login', () => {
 
     expect(harness.calls).toContain('GET /api/v1/auth/users');
     expect(harness.calls).toContain('GET /api/v1/versioning/repos');
+  });
+
+  it('starts a live refresh interval while a session is open and re-fetches users on each tick', async () => {
+    const harness = loadUiHarness(APP_JS, true);
+
+    const submit = harness.loginForm._listeners.submit as () => Promise<void>;
+    await submit.call(harness.loginForm, { preventDefault() {} });
+
+    expect(harness.intervals).toEqual(
+      expect.arrayContaining([expect.objectContaining({ delay: 15000 })]),
+    );
+
+    const usersBefore = harness.calls.filter((c) => c.includes('/api/v1/auth/users')).length;
+    const tick = harness.intervals.find((i) => i.delay === 15000);
+    tick?.fn();
+    await Promise.resolve();
+    await Promise.resolve();
+    const usersAfter = harness.calls.filter((c) => c.includes('/api/v1/auth/users')).length;
+    expect(usersAfter).toBeGreaterThan(usersBefore);
+  });
+
+  it('hides admin-only nav tabs and admin screens for non-global-admin users', async () => {
+    const harness = loadUiHarness(APP_JS, true, { isGlobalAdmin: false });
+
+    const submit = harness.loginForm._listeners.submit as () => Promise<void>;
+    await submit.call(harness.loginForm, { preventDefault() {} });
+
+    expect(harness.getEl('repos-nav-link')?.classList.contains('hidden')).toBe(true);
+    expect(harness.getEl('users-nav-link')?.classList.contains('hidden')).toBe(true);
+    expect(harness.getEl('addons-nav-link')?.classList.contains('hidden')).toBe(true);
+    expect(harness.getEl('not-admin-notice')?.classList.contains('hidden')).toBe(false);
+  });
+
+  it('keeps admin-only nav tabs visible for global admins', async () => {
+    const harness = loadUiHarness(APP_JS, true, { isGlobalAdmin: true });
+
+    const submit = harness.loginForm._listeners.submit as () => Promise<void>;
+    await submit.call(harness.loginForm, { preventDefault() {} });
+
+    expect(harness.getEl('repos-nav-link')?.classList.contains('hidden')).toBe(false);
+    expect(harness.getEl('users-nav-link')?.classList.contains('hidden')).toBe(false);
+    expect(harness.getEl('addons-nav-link')?.classList.contains('hidden')).toBe(false);
+    expect(harness.getEl('not-admin-notice')?.classList.contains('hidden')).toBe(true);
   });
 });
