@@ -51,6 +51,24 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+  ensure-release:
+    # Creates the GitHub Release for this tag exactly once, before the
+    # build-tls-cert-tool matrix runs. Previously each matrix leg raced to
+    # run `gh release view || gh release create` concurrently -- whichever
+    # leg lost the race got an HTTP 422 ("tag_name already exists") and,
+    # combined with the matrix's default fail-fast behavior, could cancel
+    # the *other* leg before it uploaded its asset. A single dedicated job
+    # removes the race entirely.
+    needs: test
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Ensure a GitHub Release exists for this tag
+        run: gh release view "${GITHUB_REF_NAME}" || gh release create "${GITHUB_REF_NAME}" --title "${GITHUB_REF_NAME}" --generate-notes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
   build-tls-cert-tool:
     # Compiles scripts/generate-server-tls-cert.ts into standalone native
     # binaries (no repo checkout / `bun install` needed on the target
@@ -58,10 +76,13 @@ jobs:
     # operator can generate a production TLS cert with a single downloaded
     # file. Only runs on an actual tag push (a release must exist to attach
     # assets to) — skipped for `workflow_dispatch` reruns of `main`.
-    needs: test
+    needs: [test, ensure-release]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     strategy:
+      # fail-fast: false -- one target's build/upload failing must never
+      # cancel the other leg before it gets to upload its own asset.
+      fail-fast: false
       matrix:
         include:
           - target: bun-linux-x64
@@ -77,12 +98,8 @@ jobs:
 
       - run: bun build ./scripts/generate-server-tls-cert.ts --compile --target=${{ matrix.target }} --outfile dist/${{ matrix.asset_name }}
 
-      - name: Ensure a GitHub Release exists for this tag
-        run: gh release view "${GITHUB_REF_NAME}" || gh release create "${GITHUB_REF_NAME}" --title "${GITHUB_REF_NAME}" --generate-notes
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
       - name: Attach binary to the GitHub Release
         run: gh release upload "${GITHUB_REF_NAME}" "dist/${{ matrix.asset_name }}" --clobber
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
