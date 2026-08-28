@@ -9,6 +9,38 @@ Each entry starts with a **plain-language summary** (what changed, in
 everyday words) before any technical detail — written so someone outside
 engineering can understand what shipped and why it matters.
 
+## [Unreleased]
+
+**In plain terms:** Deltix-Client can now confirm it is talking to the right
+server without anyone having to manually copy or paste certificate files over
+SSH. If an operator turns it on, the server will answer a single, rate-limited
+request with proof of which certificate it presents (a short digital
+fingerprint), and it is completely off unless someone deliberately enables it.
+
+### Added
+
+- **Opt-in certificate bootstrap endpoint.** New `DELTIX_CERT_BOOTSTRAP_ENABLED`
+  (default `false`, fail-closed) enables `GET /api/v1/bootstrap/certificate`,
+  an unauthenticated, per-source-IP rate-limited (20 req/min) endpoint that
+  returns the SHA-256 fingerprint (and PEM body) of the certificates this
+  server presents for its gRPC TLS listener (and its HTTP TLS listener, when
+  configured) — the same bytes any client already receives during a normal TLS
+  handshake. Purpose: let a Deltix-Client perform a Trust-On-First-Use
+  confirmation against a self-signed certificate without an operator manually
+  copying a `.crt` off the box. The response always includes a warning that the
+  fingerprint must be verified out-of-band (TOFU is not proof of identity).
+  Never reads or exposes a private key. New bounded context
+  `src/contexts/tls-discovery/` (service, fixed-window rate limiter, router —
+  no cross-context imports, per the ACL rule).
+
+### Tests
+
+- 11 new tests across `tests/unit/tls-discovery/` and
+  `tests/integration/tls-discovery/`: fingerprint determinism and format,
+  HTTP certificate isolation, no private-key material leaks (unit + over a
+  real HTTP request), rate-limit enforcement per source IP (429 after the
+  window fills), and per-key independence/window reset for the limiter.
+
 ## [0.5.4] - 2026-08-28
 
 **In plain terms:** on a machine that only ever had Bun installed (which is

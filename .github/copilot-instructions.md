@@ -39,7 +39,8 @@ shortcut a future task might suggest:
 ## 2. Architecture: modular monolith, NOT clean/hexagonal architecture
 
 - This is deliberately a **modular monolith** organized by **bounded contexts** under
-  `src/contexts/*` (`licensing`, `auth`, `transfer`, `storage`, `addons`, ...). Do not introduce
+  `src/contexts/*` (`licensing`, `auth`, `transfer`, `storage`, `addons`,
+  `admin-ui`, `tls-discovery`, `versioning`, ...). Do not introduce
   ports/adapters layers, use-case/interactor classes, or repository-pattern abstractions unless
   a context genuinely needs to swap an implementation (and even then, prefer the smallest
   possible seam).
