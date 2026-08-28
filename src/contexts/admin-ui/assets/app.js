@@ -25,6 +25,7 @@ const rolesRepoSelect = document.getElementById('roles-repo-select');
 const roleGrantForm = document.getElementById('role-grant-form');
 const roleMessage = document.getElementById('role-message');
 const rolesList = document.getElementById('roles-list');
+const knownUsernamesList = document.getElementById('known-usernames');
 const reposTableBody = document.getElementById('repos-table-body');
 const repoCreateForm = document.getElementById('repo-create-form');
 const repoCreateMessage = document.getElementById('repo-create-message');
@@ -68,6 +69,30 @@ function escapeHtml(str) {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#039;');
+}
+
+// Inline action icons (row-level table actions) — icons instead of text
+// buttons so 3 actions never wrap onto a second line on narrow tables.
+const ICON_PLAY = '<path d="M6 4l10 6-10 6V4z" stroke-linecap="round" stroke-linejoin="round" />';
+const ICON_PAUSE = '<path d="M7 5v10M13 5v10" stroke-linecap="round" stroke-linejoin="round" />';
+const ICON_SHIELD =
+  '<path d="M10 3l6 2v5c0 4-2.5 6.5-6 7-3.5-.5-6-3-6-7V5l6-2z" stroke-linecap="round" stroke-linejoin="round" /><path d="M7.5 10l1.8 1.8L12.5 8" stroke-linecap="round" stroke-linejoin="round" />';
+const ICON_TRASH =
+  '<path d="M4 6h12M8 6V4.5A1.5 1.5 0 019.5 3h1A1.5 1.5 0 0112 4.5V6M6 6l.6 9.4A1.5 1.5 0 008.1 17h3.8a1.5 1.5 0 001.5-1.6L14 6" stroke-linecap="round" stroke-linejoin="round" />';
+
+function iconButton(iconSvgPath, title, extraClass) {
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.title = title;
+  btn.setAttribute('aria-label', title);
+  btn.className =
+    'inline-flex items-center justify-center w-7 h-7 rounded-md border border-neutral-800 bg-neutral-900 text-neutral-400 hover:bg-neutral-800 transition ' +
+    (extraClass || '');
+  btn.innerHTML =
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" class="w-4 h-4">' +
+    iconSvgPath +
+    '</svg>';
+  return btn;
 }
 
 function withViewTransition(mutate) {
@@ -127,15 +152,29 @@ function renderAuditLogs() {
   }
 }
 
+// Per-element auto-dismiss timers so inline status text (e.g. "User created
+// successfully") does not stay on screen forever while the operator keeps
+// navigating — mirrors the toast auto-dismiss behavior above.
+const inlineMessageTimers = new WeakMap();
+
 function setInlineMessage(element, text, isError) {
   if (!element) return;
+  const existingTimer = inlineMessageTimers.get(element);
+  if (existingTimer) window.clearTimeout(existingTimer);
   element.textContent = text;
   element.classList.remove('hidden', 'text-red-400', 'text-emerald-400');
   element.classList.add(isError ? 'text-red-400' : 'text-emerald-400');
+  const timer = window.setTimeout(() => clearInlineMessage(element), isError ? 8000 : 5000);
+  inlineMessageTimers.set(element, timer);
 }
 
 function clearInlineMessage(element) {
   if (!element) return;
+  const existingTimer = inlineMessageTimers.get(element);
+  if (existingTimer) {
+    window.clearTimeout(existingTimer);
+    inlineMessageTimers.delete(element);
+  }
   element.textContent = '';
   element.classList.add('hidden');
 }
@@ -287,7 +326,7 @@ if (logoutButton) {
 async function loadReposAndDirectory() {
   if (!accessToken) return;
   try {
-    const res = await fetch('/api/v1/versioning/repos', { headers: authHeaders() });
+    const res = await fetch('/api/v1/versioning/repos', { headers: authHeaders(), cache: 'no-store' });
     if (!res.ok) {
       if (rolesRepoSelect) rolesRepoSelect.innerHTML = '<option value="">Failed to load repositories</option>';
       if (reposTableBody) renderTableLoadError(reposTableBody, 4, 'repositories');
@@ -502,7 +541,7 @@ async function revokeRepoRole(username) {
 async function loadUsers() {
   if (!userList || !accessToken) return;
   try {
-    const res = await fetch('/api/v1/auth/users', { headers: authHeaders() });
+    const res = await fetch('/api/v1/auth/users', { headers: authHeaders(), cache: 'no-store' });
     if (!res.ok) {
       renderTableLoadError(userList, 7, 'users');
       return;
@@ -521,6 +560,12 @@ function renderUsers(users) {
   if (dashActiveSeats) dashActiveSeats.textContent = String(activeSeats);
   if (dashTotalUsers) dashTotalUsers.textContent = String(users.length);
 
+  if (knownUsernamesList) {
+    knownUsernamesList.innerHTML = users
+      .map((user) => '<option value="' + escapeHtml(user.username) + '"></option>')
+      .join('');
+  }
+
   userList.innerHTML = '';
   if (users.length === 0) {
     const emptyRow = document.createElement('tr');
@@ -533,27 +578,29 @@ function renderUsers(users) {
     const row = document.createElement('tr');
     row.className = 'border-b border-neutral-800 last:border-0 hover:bg-neutral-800/30 transition';
     const actions = document.createElement('td');
-    actions.className = 'px-3 py-2 text-right space-x-2';
+    actions.className = 'px-3 py-2 text-right';
+    const actionsWrap = document.createElement('div');
+    actionsWrap.className = 'inline-flex items-center gap-1';
 
-    const toggleBtn = document.createElement('button');
-    toggleBtn.type = 'button';
-    toggleBtn.className = 'rounded border border-neutral-800 bg-neutral-900 px-2 py-1 text-xs hover:bg-neutral-800 text-neutral-300 transition';
-    toggleBtn.textContent = user.active ? 'Deactivate' : 'Reactivate';
+    const toggleBtn = iconButton(
+      user.active ? ICON_PAUSE : ICON_PLAY,
+      user.active ? 'Deactivate user' : 'Reactivate user',
+      'hover:text-amber-400 hover:border-amber-900/60',
+    );
     toggleBtn.addEventListener('click', () => toggleUser(user));
 
-    const adminToggleBtn = document.createElement('button');
-    adminToggleBtn.type = 'button';
-    adminToggleBtn.className = 'rounded border border-neutral-800 bg-neutral-900 px-2 py-1 text-xs hover:bg-neutral-800 text-neutral-300 transition';
-    adminToggleBtn.textContent = user.isGlobalAdmin ? 'Revoke Admin' : 'Make Admin';
+    const adminToggleBtn = iconButton(
+      ICON_SHIELD,
+      user.isGlobalAdmin ? 'Revoke global admin' : 'Grant global admin',
+      user.isGlobalAdmin ? 'text-emerald-400 hover:text-neutral-300' : 'hover:text-emerald-400',
+    );
     adminToggleBtn.addEventListener('click', () => toggleGlobalAdmin(user));
 
-    const deleteBtn = document.createElement('button');
-    deleteBtn.type = 'button';
-    deleteBtn.className = 'rounded border border-neutral-800 bg-neutral-900 px-2 py-1 text-xs text-neutral-400 hover:text-red-400 hover:border-red-900/60 transition';
-    deleteBtn.textContent = 'Delete';
+    const deleteBtn = iconButton(ICON_TRASH, 'Delete user', 'hover:text-red-400 hover:border-red-900/60');
     deleteBtn.addEventListener('click', () => promptDeleteUser(user.username));
 
-    actions.append(toggleBtn, adminToggleBtn, deleteBtn);
+    actionsWrap.append(toggleBtn, adminToggleBtn, deleteBtn);
+    actions.append(actionsWrap);
 
     const statusBadge = user.active
       ? '<span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[11px] bg-neutral-900 border border-neutral-800 text-neutral-300"><span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>Active</span>'
@@ -696,7 +743,7 @@ if (userCreateForm) {
 async function loadTrustedAddons() {
   if (!trustList || !accessToken) return;
   try {
-    const res = await fetch('/api/v1/addons/trust', { headers: authHeaders() });
+    const res = await fetch('/api/v1/addons/trust', { headers: authHeaders(), cache: 'no-store' });
     if (!res.ok) {
       renderTableLoadError(trustList, 5, 'trusted addons');
       return;

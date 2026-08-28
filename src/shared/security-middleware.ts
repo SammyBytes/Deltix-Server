@@ -31,5 +31,11 @@ export function applySecurityMiddleware(app: Hono, options: SecurityMiddlewareOp
     c.header('x-content-type-options', 'nosniff');
     c.header('x-frame-options', 'DENY');
     c.header('referrer-policy', 'no-referrer');
+    // Every response here is either a JSON API call or dynamically rendered
+    // HTML — never a static asset meant to be cached. Without this, a
+    // browser can serve a stale GET (e.g. the user/repo list) from its HTTP
+    // cache after navigating back to a tab, which looks like the server
+    // "lost" data that was actually there all along.
+    c.header('cache-control', 'no-store, no-cache, must-revalidate');
   });
 }

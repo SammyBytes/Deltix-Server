@@ -271,8 +271,9 @@
               <form id="role-grant-form" class="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2">
                 <div>
                   <label for="role-grant-username" class="block text-xs font-medium text-neutral-300 mb-1">Username</label>
-                  <input id="role-grant-username" name="username" type="text" required placeholder="alice"
+                  <input id="role-grant-username" name="username" type="text" required placeholder="alice" list="known-usernames" autocomplete="off"
                     class="w-full rounded-lg border border-neutral-800 bg-neutral-950 px-3 py-2 text-xs text-neutral-100 placeholder-neutral-600 outline-none focus:border-neutral-500 focus:ring-1 focus:ring-neutral-500" />
+                  <datalist id="known-usernames"></datalist>
                 </div>
                 <div>
                   <label for="role-grant-role" class="block text-xs font-medium text-neutral-300 mb-1">Role</label>
