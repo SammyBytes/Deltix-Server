@@ -5,11 +5,12 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Deltix Admin Setup</title>
   <meta name="robots" content="noindex, nofollow" />
+  <!-- Local Tailwind v4 (built from src/styles/admin.css — no CDN) -->
   <link rel="stylesheet" href="/admin/vendor/tailwind.css" />
   <link rel="stylesheet" href="/admin/vendor/driver.css" />
 </head>
-<body class="min-h-full bg-neutral-950 p-4 text-neutral-100 sm:p-6">
-  <main class="mx-auto max-w-lg rounded-xl border border-neutral-800 bg-neutral-900 p-5 shadow-xl sm:p-6">
+<body class="min-h-full bg-neutral-950 p-6 text-neutral-100 sm:p-8">
+  <main class="mx-auto max-w-lg rounded-xl border border-neutral-800 bg-neutral-900 p-6 shadow-xl sm:p-8">
     <h1 class="text-xl font-semibold">Deltix initial setup</h1>
     <p class="mt-2 text-sm text-neutral-400">Create the first admin user. This flow is only available once on a fresh instance.</p>
     <form id="setup-form" class="mt-6 space-y-4">
@@ -25,7 +26,7 @@
         <label for="setup-password-confirm" class="mb-1 block text-sm font-medium text-neutral-200">Confirm password</label>
         <input id="setup-password-confirm" name="passwordConfirm" type="password" required minlength="8" autocomplete="new-password" class="w-full rounded-md border border-neutral-700 bg-neutral-950 px-3 py-2 text-sm outline-none focus:border-neutral-400 focus:ring-2 focus:ring-neutral-600" />
       </div>
-      <button id="setup-submit" type="submit" class="w-full rounded-md bg-neutral-100 px-3 py-2 text-sm font-medium text-neutral-900 hover:bg-white focus:outline-none focus:ring-2 focus:ring-neutral-500">Create admin</button>
+      <button id="setup-submit" type="submit" class="w-full rounded-md bg-neutral-100 px-3 py-2.5 text-sm font-medium text-neutral-900 hover:bg-white focus:outline-none focus:ring-2 focus:ring-neutral-500">Create admin</button>
       <p id="setup-message" class="hidden text-sm" role="status"></p>
     </form>
   </main>

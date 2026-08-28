@@ -158,13 +158,15 @@ function cssSafe(value) {
 
 // Tab Switching System
 function switchTab(targetTabId) {
-  navTabs.forEach((tab) => {
-    const isActive = tab.getAttribute('data-target') === targetTabId;
-    tab.classList.toggle('active', isActive);
-  });
-  tabContents.forEach((content) => {
-    const isTarget = content.id === targetTabId;
-    content.classList.toggle('active', isTarget);
+  withViewTransition(() => {
+    navTabs.forEach((tab) => {
+      const isActive = tab.getAttribute('data-target') === targetTabId;
+      tab.classList.toggle('active', isActive);
+    });
+    tabContents.forEach((content) => {
+      const isTarget = content.id === targetTabId;
+      content.classList.toggle('active', isTarget);
+    });
   });
   const hash = targetTabId.replace('tab-', '');
   window.location.hash = hash;
@@ -211,6 +213,8 @@ function showSession(username, isGlobalAdmin) {
   if (hash && document.getElementById('tab-' + hash)) {
     switchTab('tab-' + hash);
   }
+
+  maybeRunDashboardTour();
 
   if (!currentIsGlobalAdmin) return;
   void loadUsers();
@@ -857,6 +861,25 @@ function maybeRunSetupTour() {
     ],
   });
   driverInstance.drive();
+}
+
+function maybeRunDashboardTour() {
+  if (localStorage.getItem('deltix-admin-dashboard-tour-seen') || !window.driver || !document.getElementById('main-nav-tabs')) return;
+  const steps = [
+    { element: '#main-nav-tabs', popover: { title: 'Navigate the control plane', description: 'Everything lives behind these tabs: an at-a-glance dashboard, repository roles, user management, community add-ons, and the audit log.' } },
+    { element: '[data-target="tab-dashboard"]', popover: { title: 'Dashboard', description: 'Live counters for repositories, active user sessions, and trusted add-ons.' } },
+    { element: '[data-target="tab-repos"]', popover: { title: 'Repositories & Roles', description: 'See every Dolt repository and grant or revoke per-repository roles.' } },
+  ];
+  if (currentIsGlobalAdmin) {
+    steps.push(
+      { element: '[data-target="tab-users"]', popover: { title: 'User Management', description: 'Create local accounts and review seat usage — only visible to global administrators.' } },
+      { element: '[data-target="tab-addons"]', popover: { title: 'Community Add-ons', description: 'Trust-on-first-use (TOFU) management for community add-on author keys.' } },
+    );
+  }
+  steps.push({ element: '[data-target="tab-audit"]', popover: { title: 'Audit & Diagnostics', description: 'Session activity log and a one-click diagnostic report for support requests.' } });
+  const driverInstance = window.driver.js.driver({ showProgress: true, steps });
+  driverInstance.drive();
+  localStorage.setItem('deltix-admin-dashboard-tour-seen', 'true');
 }
 
 function maybeRunAddonsTour() {

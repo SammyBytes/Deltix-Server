@@ -1,0 +1,89 @@
+/* Deltix Admin UI — local Tailwind v4 stylesheet.
+ * Built offline via `bun run build:css` → assets/vendor/tailwind.css
+ * No CDN, no internet required. Safe for air-gapped / on-premises deployments.
+ */
+@import "tailwindcss";
+
+/* ── Monochromatic design tokens ─────────────────────────────────────────── */
+@layer base {
+  * {
+    border-color: rgba(38, 38, 38, 0.8);
+    scrollbar-width: thin;
+    scrollbar-color: #262626 #0a0a0a;
+  }
+}
+
+/* ── View-transition smoothness ──────────────────────────────────────────── */
+@layer utilities {
+  ::view-transition-old(root),
+  ::view-transition-new(root) {
+    animation-duration: 200ms;
+    animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+  }
+}
+
+/* ── Tab / nav animation helpers ─────────────────────────────────────────── */
+@layer components {
+  .tab-content {
+    display: none;
+    opacity: 0;
+    transition: opacity 180ms ease-out, transform 180ms ease-out;
+    transform: translateY(4px);
+  }
+
+  .tab-content.active {
+    display: block;
+    opacity: 1;
+    transform: translateY(0);
+  }
+
+  .nav-tab {
+    transition: all 150ms cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  .nav-tab.active {
+    background-color: #262626;
+    color: #fafafa;
+    border-color: #404040;
+  }
+}
+
+/* ── Toast notifications ─────────────────────────────────────────────────── */
+@layer components {
+  .toast-container {
+    position: fixed;
+    bottom: 1.5rem;
+    right: 1.5rem;
+    z-index: 50;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    pointer-events: none;
+  }
+
+  .toast-item {
+    pointer-events: auto;
+    background: #171717;
+    border: 1px solid #262626;
+    color: #ededed;
+    padding: 0.75rem 1rem;
+    border-radius: 0.5rem;
+    font-size: 0.875rem;
+    box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5);
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    animation: toastSlideIn 200ms cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  @keyframes toastSlideIn {
+    from {
+      transform: translateY(12px);
+      opacity: 0;
+    }
+    to {
+      transform: translateY(0);
+      opacity: 1;
+    }
+  }
+}

@@ -11,6 +11,8 @@
   "scripts": {
     "dev": "bun run src/index.ts",
     "build": "bun build ./src/index.ts --compile --outfile dist/deltix-server",
+    "build:css": "bunx @tailwindcss/cli -i src/styles/admin.css -o src/contexts/admin-ui/assets/vendor/tailwind.css --content 'src/contexts/admin-ui/assets/**/*.html' --minify",
+    "watch:css": "bunx @tailwindcss/cli -i src/styles/admin.css -o src/contexts/admin-ui/assets/vendor/tailwind.css --content 'src/contexts/admin-ui/assets/**/*.html' --watch",
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
     "test": "bun test",
@@ -32,9 +34,12 @@
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.10",
+    "@tailwindcss/postcss": "^4.3.3",
     "@types/bun": "1.4.0",
     "bun-types": "^1.4.0",
-    "pino-pretty": "13.1.3"
+    "pino-pretty": "13.1.3",
+    "postcss": "^8.5.26",
+    "tailwindcss": "^4.3.3"
   },
   "engines": {
     "bun": ">=1.3.0"
