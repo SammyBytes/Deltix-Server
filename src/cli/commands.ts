@@ -6,7 +6,7 @@
  */
 
 import { Database } from 'bun:sqlite';
-import { existsSync, readFileSync, statfsSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, statfsSync, writeFileSync } from 'node:fs';
 import { arch, cpus, freemem, platform, totalmem, uptime } from 'node:os';
 import { join, resolve } from 'node:path';
 import {
@@ -279,52 +279,59 @@ export interface ConfigExportOptions {
   outputPath?: string;
 }
 
+function buildEnvExportLines(
+  config: ReturnType<typeof loadConfig>,
+  options: ConfigExportOptions,
+): string[] {
+  const lines: string[] = [
+    '# Deltix Exported Configuration',
+    `# Exported at: ${new Date().toISOString()}`,
+    `# Unredacted: ${Boolean(options.unredacted)}`,
+    '',
+    `APP_ENV=${config.environment}`,
+    `APP_HOST=${config.server.host}`,
+    `APP_PORT=${config.server.port}`,
+    `APP_GRPC_PORT=${config.server.grpcPort}`,
+    `APP_DYNAMIC_PORT=${config.server.dynamicPort}`,
+    `APP_DATA_DIR=${config.storage.dataDir}`,
+    `APP_STAGING_PATH=${config.storage.stagingRootPath}`,
+    `APP_REPOS_PATH=${config.storage.doltReposRootPath}`,
+    `APP_NAS_PATH=${config.storage.nasSimPath}`,
+    `APP_USER_DB_PATH=${config.database.userDbPath}`,
+    `APP_REPO_DB_PATH=${config.database.repoDbPath}`,
+    `APP_TICKET_DB_PATH=${config.database.ticketDbPath}`,
+    `APP_TRANSFER_JOB_DB_PATH=${config.database.transferJobDbPath}`,
+    `APP_ADDON_TRUST_DB_PATH=${config.database.addonTrustDbPath}`,
+    `APP_SESSION_DB_PATH=${config.database.sessionDbPath}`,
+    `APP_ADMIN_UI_ENABLED=${config.auth.adminUiEnabled}`,
+    `APP_SESSION_TTL_SECONDS=${config.auth.sessionTtlSeconds}`,
+    `APP_ACCESS_TOKEN_TTL_SECONDS=${config.auth.accessTokenTtlSeconds}`,
+    `APP_LOG_LEVEL=${config.logging.level}`,
+    `APP_LOG_PRETTY=${config.logging.pretty}`,
+  ];
+
+  if (config.auth.bootstrapAdminUsername) {
+    lines.push(`APP_BOOTSTRAP_ADMIN_USERNAME=${config.auth.bootstrapAdminUsername}`);
+    lines.push(
+      `APP_BOOTSTRAP_ADMIN_PASSWORD=${options.unredacted ? (config.auth.bootstrapAdminPassword ?? '') : '[REDACTED]'}`,
+    );
+  }
+
+  if (config.server.tls.enabled) {
+    lines.push('APP_TLS_ENABLED=true');
+    if (config.server.tls.certPath) lines.push(`APP_TLS_CERT_PATH=${config.server.tls.certPath}`);
+    if (config.server.tls.keyPath) lines.push(`APP_TLS_KEY_PATH=${config.server.tls.keyPath}`);
+  }
+
+  return lines;
+}
+
 export function exportConfig(options: ConfigExportOptions = {}): string {
   const config = loadConfig({ configPath: options.configPath });
   const data = options.unredacted ? config : exportSanitizedConfig(config);
 
   if (options.format === 'env') {
-    const lines: string[] = [
-      '# Deltix Exported Configuration',
-      `# Exported at: ${new Date().toISOString()}`,
-      `# Unredacted: ${Boolean(options.unredacted)}`,
-      '',
-      `APP_ENV=${config.environment}`,
-      `APP_HOST=${config.server.host}`,
-      `APP_PORT=${config.server.port}`,
-      `APP_GRPC_PORT=${config.server.grpcPort}`,
-      `APP_DYNAMIC_PORT=${config.server.dynamicPort}`,
-      `APP_DATA_DIR=${config.storage.dataDir}`,
-      `APP_STAGING_PATH=${config.storage.stagingRootPath}`,
-      `APP_REPOS_PATH=${config.storage.doltReposRootPath}`,
-      `APP_NAS_PATH=${config.storage.nasSimPath}`,
-      `APP_USER_DB_PATH=${config.database.userDbPath}`,
-      `APP_REPO_DB_PATH=${config.database.repoDbPath}`,
-      `APP_TICKET_DB_PATH=${config.database.ticketDbPath}`,
-      `APP_TRANSFER_JOB_DB_PATH=${config.database.transferJobDbPath}`,
-      `APP_ADDON_TRUST_DB_PATH=${config.database.addonTrustDbPath}`,
-      `APP_SESSION_DB_PATH=${config.database.sessionDbPath}`,
-      `APP_ADMIN_UI_ENABLED=${config.auth.adminUiEnabled}`,
-      `APP_SESSION_TTL_SECONDS=${config.auth.sessionTtlSeconds}`,
-      `APP_ACCESS_TOKEN_TTL_SECONDS=${config.auth.accessTokenTtlSeconds}`,
-      `APP_LOG_LEVEL=${config.logging.level}`,
-      `APP_LOG_PRETTY=${config.logging.pretty}`,
-    ];
-
-    if (config.auth.bootstrapAdminUsername) {
-      lines.push(`APP_BOOTSTRAP_ADMIN_USERNAME=${config.auth.bootstrapAdminUsername}`);
-      lines.push(
-        `APP_BOOTSTRAP_ADMIN_PASSWORD=${options.unredacted ? (config.auth.bootstrapAdminPassword ?? '') : '[REDACTED]'}`,
-      );
-    }
-
-    if (config.server.tls.enabled) {
-      lines.push(`APP_TLS_ENABLED=true`);
-      if (config.server.tls.certPath) lines.push(`APP_TLS_CERT_PATH=${config.server.tls.certPath}`);
-      if (config.server.tls.keyPath) lines.push(`APP_TLS_KEY_PATH=${config.server.tls.keyPath}`);
-    }
-
-    return lines.join('\n');
+    return buildEnvExportLines(config, options).join('\n');
   }
 
   return JSON.stringify(data, null, 2);
@@ -368,6 +375,7 @@ export interface DoctorSuiteResult {
   checks: DoctorCheckResult[];
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: intentionally a flat, linear sequence of independent try/catch diagnostic checks (runtime, OS, disk, SQLite, crypto keys, network ports, ...); each check is already isolated in its own try/catch and shares no state with the others, so splitting further would add indirection without reducing risk.
 export async function runDoctorSuite(configPath?: string): Promise<DoctorSuiteResult> {
   const checks: DoctorCheckResult[] = [];
 
@@ -498,7 +506,7 @@ export async function runDoctorSuite(configPath?: string): Promise<DoctorSuiteRe
         },
       });
     }
-  } catch (err) {
+  } catch {
     checks.push({
       id: 'disk-space',
       name: 'Available Storage Space',
@@ -795,21 +803,15 @@ EXAMPLES:
 `);
 }
 
-export async function runCli(argv: string[]): Promise<number> {
-  const args = argv.slice(2);
-  const command = args[0]?.toLowerCase();
+interface ParsedCliFlags {
+  jsonFlag: boolean;
+  unredactedFlag: boolean;
+  configPath: string | undefined;
+  format: 'json' | 'env';
+  outputPath: string | undefined;
+}
 
-  if (!command || command === 'help' || command === '--help' || command === '-h') {
-    printHelp();
-    return 0;
-  }
-
-  if (command === '--version' || command === '-v' || command === 'version') {
-    console.log(`deltix-server v0.4.1 (Bun ${Bun.version})`);
-    return 0;
-  }
-
-  // Parse generic flags
+function parseCliFlags(args: string[]): ParsedCliFlags {
   const jsonFlag = args.includes('--json');
   const unredactedFlag = args.includes('--unredacted');
 
@@ -833,6 +835,16 @@ export async function runCli(argv: string[]): Promise<number> {
   if (outputIdx !== -1 && args[outputIdx + 1]) {
     outputPath = args[outputIdx + 1];
   }
+
+  return { jsonFlag, unredactedFlag, configPath, format, outputPath };
+}
+
+async function dispatchCliCommand(
+  command: string,
+  args: string[],
+  flags: ParsedCliFlags,
+): Promise<number> {
+  const { jsonFlag, unredactedFlag, configPath, format, outputPath } = flags;
 
   switch (command) {
     case 'status':
@@ -859,4 +871,22 @@ export async function runCli(argv: string[]): Promise<number> {
       console.error(`[ERROR] Unknown command: '${command}'. Run 'deltix-server --help' for usage.`);
       return 1;
   }
+}
+
+export async function runCli(argv: string[]): Promise<number> {
+  const args = argv.slice(2);
+  const command = args[0]?.toLowerCase();
+
+  if (!command || command === 'help' || command === '--help' || command === '-h') {
+    printHelp();
+    return 0;
+  }
+
+  if (command === '--version' || command === '-v' || command === 'version') {
+    console.log(`deltix-server v0.4.1 (Bun ${Bun.version})`);
+    return 0;
+  }
+
+  const flags = parseCliFlags(args);
+  return dispatchCliCommand(command, args, flags);
 }

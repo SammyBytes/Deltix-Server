@@ -90,6 +90,7 @@ DELTIX_REPO_DB_PATH=${join(dataDir, 'repos.db')}
 `;
 
   await Bun.write('.env', env);
+  // biome-ignore lint/suspicious/noConsole: dev-only CLI script; this is the intended user-facing output.
   console.log(
     `Demo ready. Log in to the Admin Web UI with:\n  username: ${ADMIN_USERNAME}\n  password: ${ADMIN_PASSWORD}\n\nRun: bun run dev`,
   );
