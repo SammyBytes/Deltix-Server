@@ -2,11 +2,36 @@
 # ==============================================================================
 # Deltix Enterprise Control Plane - Linux Production Installer
 #
-# Unattended installation and systemd service configuration for Bun v1.4.
+# Installs Bun, a version-pinned Dolt binary, and the systemd service in one
+# run. Interactive by default (prompts for port/TLS choices on a real
+# terminal); pass --unattended (or set UNATTENDED=true) for scripted/CI runs,
+# where every choice falls back to its environment-variable default.
 # Strictly English, zero emojis, hardened security defaults.
 # ==============================================================================
 
 set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+# ------------------------------------------------------------------------------
+# CLI Flags
+# ------------------------------------------------------------------------------
+UNATTENDED="${UNATTENDED:-false}"
+for arg in "$@"; do
+  case "${arg}" in
+    --unattended) UNATTENDED="true" ;;
+    --help|-h)
+      echo "Usage: sudo ./install.sh [--unattended]"
+      echo "  --unattended   Skip interactive prompts; use env-var defaults (HTTP_PORT, GRPC_PORT, TLS_MODE, ...)."
+      exit 0
+      ;;
+  esac
+done
+
+# Only prompt when actually attached to a terminal — never hang a CI job.
+if [ ! -t 0 ]; then
+  UNATTENDED="true"
+fi
 
 # ------------------------------------------------------------------------------
 # Configuration Variables (Overridable via environment)
@@ -103,6 +128,64 @@ BUN_VER="$(${BUN_BIN} --version || echo "unknown")"
 log_info "Using Bun runtime: ${BUN_BIN} (v${BUN_VER})"
 
 # ------------------------------------------------------------------------------
+# Dolt Binary — Version-Pinned Installation
+#
+# Deltix pins an exact Dolt release (never "latest") so a Dolt upstream
+# change can never silently break a running Deltix instance on its next
+# reinstall/upgrade. The pinned version lives in a single file (DOLT_VERSION)
+# shipped alongside this script, so bumping it is a one-line change reviewed
+# like any other release artifact.
+# ------------------------------------------------------------------------------
+DOLT_VERSION_FILE="${SCRIPT_DIR}/DOLT_VERSION"
+if [ -f "${DOLT_VERSION_FILE}" ]; then
+  PINNED_DOLT_VERSION="$(tr -d '[:space:]' < "${DOLT_VERSION_FILE}")"
+else
+  PINNED_DOLT_VERSION="${DOLT_VERSION:-2.3.1}"
+  log_warn "DOLT_VERSION file not found next to install.sh; falling back to ${PINNED_DOLT_VERSION}."
+fi
+
+case "${ARCH}" in
+  x86_64|amd64) DOLT_ARCH="amd64" ;;
+  aarch64|arm64) DOLT_ARCH="arm64" ;;
+  *)
+    log_error "Dolt has no published release for architecture '${ARCH}'. Install Dolt ${PINNED_DOLT_VERSION} manually and re-run."
+    exit 1
+    ;;
+esac
+
+INSTALLED_DOLT_VERSION=""
+if command -v dolt >/dev/null 2>&1; then
+  INSTALLED_DOLT_VERSION="$(dolt version 2>/dev/null | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' || echo "")"
+fi
+
+if [ "${INSTALLED_DOLT_VERSION}" = "${PINNED_DOLT_VERSION}" ]; then
+  log_info "Dolt ${PINNED_DOLT_VERSION} already installed at $(command -v dolt) — skipping download."
+else
+  if [ -n "${INSTALLED_DOLT_VERSION}" ]; then
+    log_warn "Found Dolt ${INSTALLED_DOLT_VERSION} in PATH, but Deltix pins ${PINNED_DOLT_VERSION}. Installing the pinned version alongside it."
+  else
+    log_info "Dolt binary not found. Installing pinned version ${PINNED_DOLT_VERSION}..."
+  fi
+  DOLT_TARBALL="dolt-linux-${DOLT_ARCH}.tar.gz"
+  DOLT_URL="https://github.com/dolthub/dolt/releases/download/v${PINNED_DOLT_VERSION}/${DOLT_TARBALL}"
+  DOLT_TMP_DIR="$(mktemp -d)"
+  trap 'rm -rf "${DOLT_TMP_DIR}"' EXIT
+  log_info "Downloading ${DOLT_URL}..."
+  if ! curl -fsSL -o "${DOLT_TMP_DIR}/${DOLT_TARBALL}" "${DOLT_URL}"; then
+    log_error "Failed to download Dolt ${PINNED_DOLT_VERSION} for linux-${DOLT_ARCH}."
+    log_error "Check network access or install Dolt manually: https://github.com/dolthub/dolt/releases/tag/v${PINNED_DOLT_VERSION}"
+    exit 1
+  fi
+  tar -xzf "${DOLT_TMP_DIR}/${DOLT_TARBALL}" -C "${DOLT_TMP_DIR}"
+  install -d -m 755 "/opt/deltix-tools/dolt-${PINNED_DOLT_VERSION}/bin"
+  install -m 755 "${DOLT_TMP_DIR}/dolt-linux-${DOLT_ARCH}/bin/dolt" "/opt/deltix-tools/dolt-${PINNED_DOLT_VERSION}/bin/dolt"
+  ln -sf "/opt/deltix-tools/dolt-${PINNED_DOLT_VERSION}/bin/dolt" /usr/local/bin/dolt
+  rm -rf "${DOLT_TMP_DIR}"
+  trap - EXIT
+  log_success "Installed Dolt ${PINNED_DOLT_VERSION} at /usr/local/bin/dolt (pinned copy in /opt/deltix-tools)."
+fi
+
+# ------------------------------------------------------------------------------
 # Create Dedicated Service User & Group
 # ------------------------------------------------------------------------------
 if ! getent group "${SERVICE_GROUP}" >/dev/null 2>&1; then
@@ -119,6 +202,72 @@ if ! id -u "${SERVICE_USER}" >/dev/null 2>&1; then
     --shell /sbin/nologin \
     --comment "Deltix Control Plane Service" \
     "${SERVICE_USER}"
+fi
+
+# ------------------------------------------------------------------------------
+# Interactive Configuration Wizard
+#
+# Everything below has an env-var default so `--unattended` (or piping the
+# script through a non-interactive shell) reproduces the exact same result
+# as today with zero prompts. On a real terminal we ask instead of silently
+# picking defaults, so an operator never has to hand-edit deltix.env or
+# config.json after the fact for the choices that matter most: ports and
+# whether this process terminates TLS itself.
+# ------------------------------------------------------------------------------
+TLS_MODE="${TLS_MODE:-none}"   # none | self-signed | existing
+TLS_HOSTNAME="${TLS_HOSTNAME:-}"
+TLS_CERT_PATH="${TLS_CERT_PATH:-}"
+TLS_KEY_PATH="${TLS_KEY_PATH:-}"
+
+if [ "${UNATTENDED}" != "true" ]; then
+  echo ""
+  echo "=================================================================="
+  echo " Deltix Server — Interactive Setup"
+  echo "=================================================================="
+  read -rp "HTTP control plane port [${HTTP_PORT}]: " ANSWER
+  HTTP_PORT="${ANSWER:-${HTTP_PORT}}"
+
+  read -rp "gRPC transfer engine port [${GRPC_PORT}]: " ANSWER
+  GRPC_PORT="${ANSWER:-${GRPC_PORT}}"
+
+  echo ""
+  echo "TLS for the HTTP control plane and Admin Web UI:"
+  echo "  1) None — plain HTTP (fine behind a reverse proxy that already terminates TLS)"
+  echo "  2) Self-signed certificate — generated now for a hostname or IP you provide"
+  echo "  3) Existing certificate — point at a cert/key you already have"
+  read -rp "Choose [1]: " ANSWER
+  case "${ANSWER:-1}" in
+    2)
+      TLS_MODE="self-signed"
+      read -rp "Hostname or IP this server will be reached at: " TLS_HOSTNAME
+      ;;
+    3)
+      TLS_MODE="existing"
+      read -rp "Path to certificate file (.crt/.pem): " TLS_CERT_PATH
+      read -rp "Path to private key file (.key/.pem): " TLS_KEY_PATH
+      ;;
+    *)
+      TLS_MODE="none"
+      ;;
+  esac
+
+  echo ""
+  read -rp "Start the deltix.service now after installation? [y/N]: " ANSWER
+  case "${ANSWER:-n}" in
+    y|Y|yes|Yes) AUTO_START="true" ;;
+    *) AUTO_START="${AUTO_START:-false}" ;;
+  esac
+  echo "=================================================================="
+  echo ""
+fi
+
+if [ "${TLS_MODE}" = "self-signed" ] && [ -z "${TLS_HOSTNAME}" ]; then
+  log_error "TLS_MODE=self-signed requires TLS_HOSTNAME (hostname or IP) to be set."
+  exit 1
+fi
+if [ "${TLS_MODE}" = "existing" ] && { [ -z "${TLS_CERT_PATH}" ] || [ -z "${TLS_KEY_PATH}" ]; }; then
+  log_error "TLS_MODE=existing requires both TLS_CERT_PATH and TLS_KEY_PATH to be set."
+  exit 1
 fi
 
 # ------------------------------------------------------------------------------
@@ -142,7 +291,6 @@ chown -R "${SERVICE_USER}:${SERVICE_GROUP}" "${DATA_DIR}" "${CONFIG_DIR}" "${LOG
 # ------------------------------------------------------------------------------
 # Copy Application Files
 # ------------------------------------------------------------------------------
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 log_info "Syncing application files from ${SCRIPT_DIR} to ${INSTALL_DIR}..."
 
 if [ -d "${SCRIPT_DIR}/src" ]; then
@@ -150,6 +298,7 @@ if [ -d "${SCRIPT_DIR}/src" ]; then
   cp -r "${SCRIPT_DIR}/package.json" "${INSTALL_DIR}/" 2>/dev/null || true
   cp -r "${SCRIPT_DIR}/tsconfig.json" "${INSTALL_DIR}/" 2>/dev/null || true
   cp -r "${SCRIPT_DIR}/scripts" "${INSTALL_DIR}/" 2>/dev/null || true
+  cp -r "${SCRIPT_DIR}/DOLT_VERSION" "${INSTALL_DIR}/" 2>/dev/null || true
   if [ -f "${SCRIPT_DIR}/bun.lock" ]; then
     cp "${SCRIPT_DIR}/bun.lock" "${INSTALL_DIR}/"
   fi
@@ -170,6 +319,23 @@ fi
 chown -R "${SERVICE_USER}:${SERVICE_GROUP}" "${INSTALL_DIR}"
 
 # ------------------------------------------------------------------------------
+# TLS Certificate (only if the wizard/env selected self-signed or existing)
+# ------------------------------------------------------------------------------
+RESOLVED_TLS_CERT_PATH=""
+RESOLVED_TLS_KEY_PATH=""
+if [ "${TLS_MODE}" = "self-signed" ]; then
+  log_info "Generating a self-signed TLS certificate for '${TLS_HOSTNAME}'..."
+  (cd "${INSTALL_DIR}" && "${BUN_BIN}" run scripts/generate-server-tls-cert.ts "${TLS_HOSTNAME}" "${DATA_DIR}/certs")
+  RESOLVED_TLS_CERT_PATH="${DATA_DIR}/certs/server.crt"
+  RESOLVED_TLS_KEY_PATH="${DATA_DIR}/certs/server.key"
+  chown "${SERVICE_USER}:${SERVICE_GROUP}" "${RESOLVED_TLS_CERT_PATH}" "${RESOLVED_TLS_KEY_PATH}"
+  chmod 640 "${RESOLVED_TLS_CERT_PATH}" "${RESOLVED_TLS_KEY_PATH}"
+elif [ "${TLS_MODE}" = "existing" ]; then
+  RESOLVED_TLS_CERT_PATH="${TLS_CERT_PATH}"
+  RESOLVED_TLS_KEY_PATH="${TLS_KEY_PATH}"
+fi
+
+# ------------------------------------------------------------------------------
 # Generate Configuration Files
 # ------------------------------------------------------------------------------
 CONFIG_FILE="${CONFIG_DIR}/config.json"
@@ -177,6 +343,19 @@ ENV_FILE="${CONFIG_DIR}/deltix.env"
 
 if [ ! -f "${CONFIG_FILE}" ]; then
   log_info "Generating initial configuration: ${CONFIG_FILE}"
+  if [ "${TLS_MODE}" != "none" ]; then
+    TLS_JSON_BLOCK="{
+      \"enabled\": true,
+      \"certPath\": \"${RESOLVED_TLS_CERT_PATH}\",
+      \"keyPath\": \"${RESOLVED_TLS_KEY_PATH}\",
+      \"autoGenerate\": false
+    }"
+  else
+    TLS_JSON_BLOCK="{
+      \"enabled\": false,
+      \"autoGenerate\": false
+    }"
+  fi
   cat <<EOF > "${CONFIG_FILE}"
 {
   "environment": "production",
@@ -185,10 +364,7 @@ if [ ! -f "${CONFIG_FILE}" ]; then
     "port": ${HTTP_PORT},
     "grpcPort": ${GRPC_PORT},
     "dynamicPort": false,
-    "tls": {
-      "enabled": false,
-      "autoGenerate": false
-    }
+    "tls": ${TLS_JSON_BLOCK}
   },
   "storage": {
     "dataDir": "${DATA_DIR}",
@@ -312,10 +488,17 @@ echo " Environment File:    ${ENV_FILE}"
 echo " Service User/Group:  ${SERVICE_USER}:${SERVICE_GROUP}"
 echo " HTTP Port:           ${HTTP_PORT}"
 echo " gRPC Port:           ${GRPC_PORT}"
+echo " Dolt Version:        ${PINNED_DOLT_VERSION} (pinned)"
+echo " TLS:                 ${TLS_MODE}"
 echo "=================================================================="
 echo "Next Steps:"
-echo " 1. Start the service:          systemctl start ${SERVICE_NAME}"
-echo " 2. Check service status:       systemctl status ${SERVICE_NAME}"
+if [ "${AUTO_START}" = "true" ]; then
+  echo " 1. Service is already running. Check status: systemctl status ${SERVICE_NAME}"
+else
+  echo " 1. Start the service:          systemctl start ${SERVICE_NAME}"
+fi
+echo " 2. Open the Admin Web UI:      http$( [ "${TLS_MODE}" != "none" ] && echo "s" )://<this-host>:${HTTP_PORT}/admin"
+echo "    (first visit creates the initial administrator account)"
 echo " 3. View service logs:          journalctl -u ${SERVICE_NAME} -f"
 echo " 4. Run system diagnostics:     cd ${INSTALL_DIR} && ${BUN_BIN} run src/cli/commands.ts doctor"
 echo "=================================================================="

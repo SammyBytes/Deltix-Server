@@ -94,6 +94,127 @@ $bunVersion = & $BunPath --version
 Log-Info "Verified Bun runtime: $BunPath (v$bunVersion)"
 
 # ------------------------------------------------------------------------------
+# Dolt Binary — Version-Pinned Installation
+#
+# Deltix pins an exact Dolt release (never "latest") so an upstream Dolt
+# change can never silently break a running Deltix instance on its next
+# reinstall/upgrade. The pinned version lives in a single file (DOLT_VERSION)
+# shipped alongside this script.
+# ------------------------------------------------------------------------------
+$scriptDir = Split-Path -Parent $PSScriptRoot
+$doltVersionFile = Join-Path $scriptDir "DOLT_VERSION"
+if (Test-Path $doltVersionFile) {
+    $pinnedDoltVersion = (Get-Content $doltVersionFile -Raw).Trim()
+} else {
+    $pinnedDoltVersion = "2.3.1"
+    Log-Warn "DOLT_VERSION file not found next to install-windows.ps1; falling back to $pinnedDoltVersion."
+}
+
+$installedDoltVersion = $null
+$doltCmd = Get-Command "dolt" -ErrorAction SilentlyContinue
+if ($doltCmd) {
+    $versionOutput = & $doltCmd.Source version 2>$null | Select-Object -First 1
+    if ($versionOutput -match '(\d+\.\d+\.\d+)') { $installedDoltVersion = $Matches[1] }
+}
+
+$doltInstallDir = "C:\Program Files\Deltix-Tools\dolt-$pinnedDoltVersion"
+if ($installedDoltVersion -eq $pinnedDoltVersion) {
+    Log-Info "Dolt $pinnedDoltVersion already installed at $($doltCmd.Source) — skipping download."
+} else {
+    if ($installedDoltVersion) {
+        Log-Warn "Found Dolt $installedDoltVersion in PATH, but Deltix pins $pinnedDoltVersion. Installing the pinned version alongside it."
+    } else {
+        Log-Info "Dolt binary not found. Installing pinned version $pinnedDoltVersion..."
+    }
+    $doltZipUrl = "https://github.com/dolthub/dolt/releases/download/v$pinnedDoltVersion/dolt-windows-amd64.zip"
+    $doltTmpZip = Join-Path $env:TEMP "dolt-$pinnedDoltVersion.zip"
+    $doltTmpExtract = Join-Path $env:TEMP "dolt-$pinnedDoltVersion-extract"
+    try {
+        Log-Info "Downloading $doltZipUrl..."
+        Invoke-WebRequest -Uri $doltZipUrl -OutFile $doltTmpZip -UseBasicParsing
+        if (Test-Path $doltTmpExtract) { Remove-Item $doltTmpExtract -Recurse -Force }
+        Expand-Archive -Path $doltTmpZip -DestinationPath $doltTmpExtract -Force
+        New-Item -ItemType Directory -Path $doltInstallDir -Force | Out-Null
+        $extractedBin = Get-ChildItem -Path $doltTmpExtract -Filter "dolt.exe" -Recurse | Select-Object -First 1
+        Copy-Item -Path $extractedBin.FullName -Destination "$doltInstallDir\dolt.exe" -Force
+        $machinePath = [Environment]::GetEnvironmentVariable("Path", "Machine")
+        if ($machinePath -notlike "*$doltInstallDir*") {
+            [Environment]::SetEnvironmentVariable("Path", "$machinePath;$doltInstallDir", "Machine")
+            $env:Path = "$env:Path;$doltInstallDir"
+        }
+        Log-Success "Installed Dolt $pinnedDoltVersion at $doltInstallDir\dolt.exe (added to system PATH)."
+    } catch {
+        Log-Error "Failed to download/install Dolt $pinnedDoltVersion for windows-amd64: $_"
+        Log-Error "Install Dolt manually from https://github.com/dolthub/dolt/releases/tag/v$pinnedDoltVersion and re-run."
+        exit 1
+    } finally {
+        Remove-Item $doltTmpZip -Force -ErrorAction SilentlyContinue
+        Remove-Item $doltTmpExtract -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
+# ------------------------------------------------------------------------------
+# Interactive Configuration Wizard
+#
+# Everything below has a parameter default, so `-Unattended` (or running
+# from a non-interactive host, e.g. CI) reproduces today's zero-prompt
+# behavior exactly. Interactively, we ask for the choices that matter most —
+# ports and whether this process terminates TLS itself — instead of leaving
+# the operator to hand-edit deltix.env or config.json afterward.
+# ------------------------------------------------------------------------------
+$tlsMode = "none"
+$tlsHostname = $null
+$tlsCertPath = $null
+$tlsKeyPath = $null
+$isInteractive = (-not $Unattended) -and [Environment]::UserInteractive -and (-not [Console]::IsInputRedirected)
+
+if ($isInteractive) {
+    Write-Host ""
+    Write-Host "=================================================================="
+    Write-Host " Deltix Server - Interactive Setup"
+    Write-Host "=================================================================="
+    $answer = Read-Host "HTTP control plane port [$HttpPort]"
+    if ($answer) { $HttpPort = [int]$answer }
+
+    $answer = Read-Host "gRPC transfer engine port [$GrpcPort]"
+    if ($answer) { $GrpcPort = [int]$answer }
+
+    Write-Host ""
+    Write-Host "TLS for the HTTP control plane and Admin Web UI:"
+    Write-Host "  1) None - plain HTTP (fine behind a reverse proxy that already terminates TLS)"
+    Write-Host "  2) Self-signed certificate - generated now for a hostname or IP you provide"
+    Write-Host "  3) Existing certificate - point at a cert/key you already have"
+    $answer = Read-Host "Choose [1]"
+    switch ($answer) {
+        "2" {
+            $tlsMode = "self-signed"
+            $tlsHostname = Read-Host "Hostname or IP this server will be reached at"
+        }
+        "3" {
+            $tlsMode = "existing"
+            $tlsCertPath = Read-Host "Path to certificate file (.crt/.pem)"
+            $tlsKeyPath = Read-Host "Path to private key file (.key/.pem)"
+        }
+        default { $tlsMode = "none" }
+    }
+
+    Write-Host ""
+    $answer = Read-Host "Start the Windows service now after installation? [y/N]"
+    if ($answer -match '^(y|yes)$') { $StartService = $true }
+    Write-Host "=================================================================="
+    Write-Host ""
+}
+
+if ($tlsMode -eq "self-signed" -and -not $tlsHostname) {
+    Log-Error "Self-signed TLS requires a hostname or IP."
+    exit 1
+}
+if ($tlsMode -eq "existing" -and (-not $tlsCertPath -or -not $tlsKeyPath)) {
+    Log-Error "Existing TLS mode requires both a certificate path and a key path."
+    exit 1
+}
+
+# ------------------------------------------------------------------------------
 # Directory Setup & Access Control Lists
 # ------------------------------------------------------------------------------
 Log-Info "Creating installation and data directory hierarchy..."
@@ -127,7 +248,6 @@ try {
 # ------------------------------------------------------------------------------
 # Copy Application Files
 # ------------------------------------------------------------------------------
-$scriptDir = Split-Path -Parent $PSScriptRoot
 Log-Info "Deploying application code to $InstallDir..."
 
 if (Test-Path "$scriptDir\src") {
@@ -135,6 +255,7 @@ if (Test-Path "$scriptDir\src") {
     if (Test-Path "$scriptDir\package.json") { Copy-Item -Path "$scriptDir\package.json" -Destination "$InstallDir\" -Force }
     if (Test-Path "$scriptDir\tsconfig.json") { Copy-Item -Path "$scriptDir\tsconfig.json" -Destination "$InstallDir\" -Force }
     if (Test-Path "$scriptDir\scripts") { Copy-Item -Path "$scriptDir\scripts" -Destination "$InstallDir\" -Recurse -Force }
+    if (Test-Path "$scriptDir\DOLT_VERSION") { Copy-Item -Path "$scriptDir\DOLT_VERSION" -Destination "$InstallDir\" -Force }
     if (Test-Path "$scriptDir\bun.lock") { Copy-Item -Path "$scriptDir\bun.lock" -Destination "$InstallDir\" -Force }
     if (Test-Path "$scriptDir\packages") { Copy-Item -Path "$scriptDir\packages" -Destination "$InstallDir\" -Recurse -Force }
     if (Test-Path "$scriptDir\proto") { Copy-Item -Path "$scriptDir\proto" -Destination "$InstallDir\" -Recurse -Force }
@@ -152,6 +273,26 @@ if (-not (Test-Path "$InstallDir\node_modules")) {
 }
 
 # ------------------------------------------------------------------------------
+# TLS Certificate (only if the wizard/parameters selected self-signed or existing)
+# ------------------------------------------------------------------------------
+$resolvedTlsCertPath = $null
+$resolvedTlsKeyPath = $null
+if ($tlsMode -eq "self-signed") {
+    Log-Info "Generating a self-signed TLS certificate for '$tlsHostname'..."
+    Push-Location $InstallDir
+    try {
+        & $BunPath run scripts/generate-server-tls-cert.ts $tlsHostname "$DataDir\certs"
+    } finally {
+        Pop-Location
+    }
+    $resolvedTlsCertPath = "$DataDir\certs\server.crt".Replace('\', '/')
+    $resolvedTlsKeyPath = "$DataDir\certs\server.key".Replace('\', '/')
+} elseif ($tlsMode -eq "existing") {
+    $resolvedTlsCertPath = $tlsCertPath.Replace('\', '/')
+    $resolvedTlsKeyPath = $tlsKeyPath.Replace('\', '/')
+}
+
+# ------------------------------------------------------------------------------
 # Generate Configuration Files
 # ------------------------------------------------------------------------------
 $configFile = "$DataDir\config\config.json"
@@ -160,6 +301,23 @@ $envFile = "$DataDir\config\deltix.env"
 if (-not (Test-Path $configFile)) {
     Log-Info "Generating production configuration: $configFile"
     $escapedDataDir = $DataDir.Replace('\', '/')
+    if ($tlsMode -ne "none") {
+        $tlsJsonBlock = @"
+{
+      "enabled": true,
+      "certPath": "$resolvedTlsCertPath",
+      "keyPath": "$resolvedTlsKeyPath",
+      "autoGenerate": false
+    }
+"@
+    } else {
+        $tlsJsonBlock = @"
+{
+      "enabled": false,
+      "autoGenerate": false
+    }
+"@
+    }
     $configContent = @"
 {
   "environment": "production",
@@ -168,10 +326,7 @@ if (-not (Test-Path $configFile)) {
     "port": $HttpPort,
     "grpcPort": $GrpcPort,
     "dynamicPort": false,
-    "tls": {
-      "enabled": false,
-      "autoGenerate": false
-    }
+    "tls": $tlsJsonBlock
   },
   "storage": {
     "dataDir": "$escapedDataDir",
@@ -296,10 +451,14 @@ Write-Host " Configuration File:  $configFile"
 Write-Host " Environment File:    $envFile"
 Write-Host " HTTP Port:           $HttpPort"
 Write-Host " gRPC Port:           $GrpcPort"
+Write-Host " Dolt Version:        $pinnedDoltVersion (pinned)"
+Write-Host " TLS:                 $tlsMode"
 Write-Host "=================================================================="
 Write-Host "Next Steps:"
 Write-Host " 1. Start the service:          Start-Service -Name $ServiceName"
 Write-Host " 2. Check service status:       Get-Service -Name $ServiceName"
 Write-Host " 3. View service logs:          Get-Content -Path $DataDir\logs\deltix.log -Tail 50"
 Write-Host " 4. Run system diagnostics:     & '$BunPath' run '$InstallDir\src\cli\commands.ts' doctor"
+Write-Host " 5. Open the Admin Web UI:      http$( if ($tlsMode -ne 'none') { 's' } )://<this-host>:$HttpPort/admin"
+Write-Host "    (first visit creates the initial administrator account)"
 Write-Host "=================================================================="
