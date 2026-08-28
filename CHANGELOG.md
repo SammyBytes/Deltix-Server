@@ -9,6 +9,28 @@ Each entry starts with a **plain-language summary** (what changed, in
 everyday words) before any technical detail — written so someone outside
 engineering can understand what shipped and why it matters.
 
+## [0.6.7] - 2026-08-28
+
+**In plain terms:** the Admin Web UI page now asks the browser for its own
+script using a versioned address (`/admin/app.js?v=0.6.7`). This guarantees
+that after you update the server, every browser — even one that ignored the
+no-cache headers — is forced to load the brand-new user-interface script and
+never keep running an old copy of the dashboard code that rendered empty
+tables. It also finally stops the recurring "I upgraded but the UI didn't
+change" confusion.
+
+### Fixed
+
+- **Admin UI asset versioning**: `login.html` and `setup.html` referenced
+  `/admin/app.js` with no version marker. The pages are now assembled with a
+  `?v=<package version>` suffix at serve time, so the UI script is
+  cache-busted per release and can never be served stale across an upgrade.
+
+### Tests
+
+- Verified the asset URL substitution resolves to `?v=<version>`; lint 0
+  errors; unit 259 pass / 0 fail.
+
 ## [0.6.6] - 2026-08-28
 
 **In plain terms:** the server's health-check command kept reporting the HTTP

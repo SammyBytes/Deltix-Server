@@ -1,11 +1,18 @@
 import { join } from 'node:path';
 import { Hono } from 'hono';
+import packageJson from '../../../package.json' with { type: 'json' };
 import type { AuthService } from '../auth';
 
 const LOGIN_PAGE_PATH = join(import.meta.dir, 'assets', 'login.html');
-const loginPageHtml = await Bun.file(LOGIN_PAGE_PATH).text();
+const loginPageHtml = (await Bun.file(LOGIN_PAGE_PATH).text()).replace(
+  '/admin/app.js',
+  `/admin/app.js?v=${packageJson.version}`,
+);
 const SETUP_PAGE_PATH = join(import.meta.dir, 'assets', 'setup.html');
-const setupPageHtml = await Bun.file(SETUP_PAGE_PATH).text();
+const setupPageHtml = (await Bun.file(SETUP_PAGE_PATH).text()).replace(
+  '/admin/app.js',
+  `/admin/app.js?v=${packageJson.version}`,
+);
 const APP_SCRIPT_PATH = join(import.meta.dir, 'assets', 'app.js');
 const appScriptJs = await Bun.file(APP_SCRIPT_PATH).text();
 
