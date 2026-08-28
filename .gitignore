@@ -13,6 +13,8 @@ dist/
 # Local state / databases
 *.db
 *.db-journal
+*.db-shm
+*.db-wal
 .deltix/
 
 # Dolt (never commit real repos into source control)

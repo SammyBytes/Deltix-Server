@@ -9,6 +9,72 @@ Each entry starts with a **plain-language summary** (what changed, in
 everyday words) before any technical detail — written so someone outside
 engineering can understand what shipped and why it matters.
 
+## [0.5.0] - 2026-08-28
+
+**In plain terms:** installing Deltix-Server on a real machine (not
+Docker) used to mean hand-editing configuration files and hoping you
+picked the right ports and Dolt version yourself. Now the installer asks
+you a handful of plain questions — ports, whether you want HTTPS and how
+— and does the rest, including installing the exact, tested version of
+Dolt it needs (never whatever happens to be "latest" that week). On top
+of that, three separate Admin Web UI annoyances are fixed: action buttons
+that used to wrap onto two lines, status messages that never went away,
+and a username field that made you guess/type exactly right instead of
+suggesting existing users. There's also a new installation guide, and a
+CI pipeline problem that was silently blocking every future release has
+been fixed.
+
+### Added
+
+- **Interactive installation wizard** in `scripts/install.sh` (Linux) and
+  `scripts/install-windows.ps1` (Windows): prompts for the HTTP/gRPC
+  ports, TLS mode (none / self-signed / existing certificate), and
+  whether to start the service immediately — then generates
+  `config.json`/`deltix.env` itself. Fully skippable with `--unattended`
+  / `-Unattended` (also auto-detected when stdin isn't a terminal).
+- **Dolt auto-install pinned to an exact version** (`DOLT_VERSION` at the
+  repo root, currently `2.3.1`) on both installers — Dolt is downloaded
+  and installed automatically, and only re-downloaded when that pinned
+  version changes, so an upstream Dolt release can never silently break
+  a running install.
+- `INSTALL.md`: a full, professional installation guide (Linux, Windows,
+  and Deltix-Client) covering what each installer creates, the wizard's
+  questions, upgrades, and standalone TLS certificate generation.
+
+### Fixed
+
+- Admin Web UI users-table actions (deactivate/reactivate, toggle admin,
+  delete) now render as a compact row of icon buttons instead of text
+  buttons, so they no longer wrap awkwardly on narrower screens.
+- Inline status/success/error messages in the Admin Web UI now
+  auto-dismiss (5s for success, 8s for error) instead of staying on
+  screen indefinitely until the next form submission.
+- The Grant Role form's username field now offers autocomplete
+  suggestions from known usernames instead of requiring an exact,
+  error-prone manual match.
+- Added a global `cache-control: no-store` response header plus explicit
+  `cache: 'no-store'` on the repos/users/addon-trust list requests, to
+  harden against stale list data being shown in the Admin Web UI after a
+  restart or upgrade until a new item happened to be created.
+- Resolved pre-existing Biome lint errors on `main` (excessive function
+  complexity in the CLI's `exportConfig`/`runCli`, unused imports, and
+  formatting) that had started silently failing CI on every subsequent
+  push.
+
+### Tests
+
+- Full `bun test` suite re-verified after all changes: 503/505 passing.
+  The 2 remaining failures are the already-documented pre-existing
+  smoke-test timing flakiness under system load (fixed 800ms boot waits
+  in `tests/smoke/*`) — reproduced independently of this release's
+  changes and confirmed to pass on an isolated re-run of
+  `tests/smoke/` alone.
+- `bash -n` on `install.sh` and a real PowerShell 7.4.6 AST parse
+  (`[System.Management.Automation.Language.Parser]::ParseFile`) on
+  `install-windows.ps1` confirm both installers are syntactically valid.
+  Not executed end-to-end in this environment since both scripts are
+  destructive (create system users/services/directories).
+
 ## [0.4.1] - 2026-08-27
 
 **In plain terms:** you no longer need the server's source code to generate
