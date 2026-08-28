@@ -9,6 +9,39 @@ Each entry starts with a **plain-language summary** (what changed, in
 everyday words) before any technical detail — written so someone outside
 engineering can understand what shipped and why it matters.
 
+## [0.6.5] - 2026-08-28
+
+**In plain terms:** this patch makes the server's diagnostic commands tell the
+truth on a production machine. When you logged into the server and ran the
+health-check command by hand, it looked at the wrong folders and databases —
+it reported "permission denied" and "database missing" that weren't real, and
+it even created stray keys in the source directory. It now automatically
+reads the server's real configuration file (the same one the running service
+uses), so its checks examine the actual data directories and report only real
+problems.
+
+### Fixed
+
+- **Diagnostic CLI ignored the production environment file**: the running
+  service loads `/etc/deltix/deltix.env` (via systemd `EnvironmentFile`), but
+  the CLI run by an operator — `bun run src/cli/commands.ts doctor` — did not,
+  so it analyzed the source-tree defaults (`./data/...`) instead of the real
+  deployment paths (`/var/lib/deltix/...`). On a real install this produced
+  misleading check results (EACCES on `/opt/deltix/data`, "database file
+  missing", keys regenerated under the app directory). `loadProductionEnvFile`
+  now merges `/etc/deltix/deltix.env` (or `$DELTIX_ENV_FILE`) into `Bun.env`
+  at CLI startup, mirroring systemd's behavior; existing environment variables
+  are never overwritten, and the feature is a no-op where the file does not
+  exist (dev/CI).
+
+### Tests
+
+- Verified manually: `doctor` still reports "9 passed / 0 failures" in dev;
+  with a simulated `deltix.env` pointing at `/var/lib/deltix/db/users.db`,
+  `config export` resolves `userDbPath` to the real path instead of `./data`.
+- Full local suite: lint 0 errors (81 pre-existing CLI `noConsole` warnings),
+  unit 259 pass / 0 fail, smoke 34 pass / 0 fail.
+
 ## [0.6.4] - 2026-08-28
 
 **In plain terms:** this patch fixes a trap in the installer. Reinstalling or

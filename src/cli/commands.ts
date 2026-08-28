@@ -6,7 +6,7 @@
  */
 
 import { Database } from 'bun:sqlite';
-import { existsSync, statfsSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, statfsSync, writeFileSync } from 'node:fs';
 import { arch, cpus, freemem, platform, totalmem, uptime } from 'node:os';
 import { join, resolve } from 'node:path';
 import packageJson from '../../package.json' with { type: 'json' };
@@ -874,7 +874,46 @@ async function dispatchCliCommand(
   }
 }
 
+// ---------------------------------------------------------------------------
+// Env file loading (production parity)
+// ---------------------------------------------------------------------------
+
+const DEFAULT_PROD_ENV_FILE = '/etc/deltix/deltix.env';
+
+/**
+ * Loads the production environment file the same way systemd does
+ * (EnvironmentFile=/etc/deltix/deltix.env). When the CLI is run manually on a
+ * production box — `bun run src/cli/commands.ts doctor` — merging this file
+ * into Bun.env makes every command (status, doctor, config export) reason
+ * about the REAL data/config paths the running service uses, instead of the
+ * source-tree defaults (`./data/...`). Harmless no-op in dev/CI where the file
+ * does not exist; never overwrites variables already set in the calling
+ * environment.
+ */
+function loadProductionEnvFileInto(env: Record<string, string | undefined>): void {
+  const envFilePath = env.DELTIX_ENV_FILE ?? DEFAULT_PROD_ENV_FILE;
+  if (!existsSync(envFilePath)) return;
+  try {
+    const text = readFileSync(envFilePath, 'utf-8');
+    for (const line of text.split('\n')) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith('#')) continue;
+      const eq = trimmed.indexOf('=');
+      if (eq === -1) continue;
+      const key = trimmed.slice(0, eq).trim();
+      const rawValue = trimmed.slice(eq + 1).trim();
+      if (!key || key in env) continue;
+      const value = rawValue.replace(/^"(.*)"$/s, '$1').replace(/^'(.*)'$/s, '$1');
+      env[key] = value;
+    }
+  } catch {
+    // Best-effort: diagnostics must still run when the env file is unreadable.
+  }
+}
+
 export async function runCli(argv: string[]): Promise<number> {
+  loadProductionEnvFileInto(Bun.env as Record<string, string | undefined>);
+
   const args = argv.slice(2);
   const command = args[0]?.toLowerCase();
 
