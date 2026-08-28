@@ -9,6 +9,37 @@ Each entry starts with a **plain-language summary** (what changed, in
 everyday words) before any technical detail — written so someone outside
 engineering can understand what shipped and why it matters.
 
+## [0.6.4] - 2026-08-28
+
+**In plain terms:** this patch fixes a trap in the installer. Reinstalling or
+upgrading the server while it was still running did not actually load the new
+version — the installer would copy the new files and print "Starting", but the
+old server process kept running in memory because `systemctl start` does
+nothing if the service is already active. That made it look like every upgrade
+"didn't work": the version badge and logs still showed the previous build no
+matter what you installed. Now the installer properly restarts a running
+service during a reinstall, so the version you install is the version that
+runs.
+
+### Fixed
+
+- **`scripts/install.sh` never restarted an already-running service**: when a
+  reinstall ran with `Start the deltix.service now? [y/N]: y`, the installer
+  called `systemctl start`, which is a no-op on an active unit. The freshly
+  synced application files sat on disk while the old process kept running the
+  previous version — confirmed on a real server: after "successfully" installing
+  0.6.2 over a running 0.6.1, `systemctl status` still showed the 0.6.1 process
+  (boot log `"version":"0.6.1"`). The installer now checks
+  `systemctl is-active` and uses `systemctl restart` when the unit is already
+  running, so an upgrade actually upgrades the running process.
+
+### Tests
+
+- `bash -n scripts/install.sh` passes (syntax-checked after the change).
+- Verified against the live failure pattern that motivated the fix: the
+  already-running service now bounces on reinstall instead of silently keeping
+  the old binary in memory.
+
 ## [0.6.3] - 2026-08-28
 
 **In plain terms:** this patch makes the server behave correctly when several

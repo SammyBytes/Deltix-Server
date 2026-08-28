@@ -554,8 +554,17 @@ log_info "Enabling ${SERVICE_NAME} to start on boot..."
 systemctl enable "${SERVICE_NAME}"
 
 if [ "${AUTO_START}" = "true" ]; then
-  log_info "Starting ${SERVICE_NAME}..."
-  systemctl start "${SERVICE_NAME}"
+  # `systemctl start` is a no-op when the unit is already active, which meant a
+  # reinstall/upgrade left the OLD process running the previous version on disk
+  # while the new files sat dormant until the next manual restart. Detect the
+  # already-running case and restart so the freshly written code actually loads.
+  if systemctl is-active --quiet "${SERVICE_NAME}"; then
+    log_info "Restarting running ${SERVICE_NAME} to load updated application files..."
+    systemctl restart "${SERVICE_NAME}"
+  else
+    log_info "Starting ${SERVICE_NAME}..."
+    systemctl start "${SERVICE_NAME}"
+  fi
 fi
 
 # ------------------------------------------------------------------------------
