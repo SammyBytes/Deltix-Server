@@ -100,6 +100,16 @@ const envSchema = z
     // self-signed certificate for a direct, no-reverse-proxy deployment.
     DELTIX_HTTP_TLS_CERT_PATH: z.string().min(1).optional(),
     DELTIX_HTTP_TLS_KEY_PATH: z.string().min(1).optional(),
+    // Opt-in, unauthenticated endpoint that lets a Deltix-Client fetch this
+    // server's own TLS certificate + SHA-256 fingerprint for a
+    // Trust-On-First-Use bootstrap flow, instead of an operator manually
+    // copying a .crt file off the box. Disabled by default (fail-closed) —
+    // an operator must explicitly opt in. See src/contexts/tls-discovery.
+    DELTIX_CERT_BOOTSTRAP_ENABLED: z.preprocess(
+      (value) =>
+        typeof value === 'string' ? ['true', '1', 'yes'].includes(value.toLowerCase()) : value,
+      z.boolean().default(false),
+    ),
   })
   .superRefine((env, ctx) => {
     const hasBootstrapUsername = typeof env.DELTIX_BOOTSTRAP_ADMIN_USERNAME === 'string';

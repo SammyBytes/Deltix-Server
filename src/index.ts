@@ -25,6 +25,10 @@ import {
   NasSyncWorker,
   startGrpcTransferEngine,
 } from './contexts/storage';
+import {
+  CertificateBootstrapService,
+  createCertificateBootstrapRouter,
+} from './contexts/tls-discovery';
 import { createTicketService, createTransferRouter } from './contexts/transfer';
 import type { RepoProvisioningService } from './contexts/versioning';
 import { createVersioningRouter, createVersioningServices } from './contexts/versioning';
@@ -141,6 +145,18 @@ async function main(): Promise<void> {
   if (env.DELTIX_ADMIN_UI_ENABLED) {
     app.route('/admin', createAdminUiRouter(authService));
     logger.info('Admin Web UI enabled at /admin');
+  }
+
+  if (env.DELTIX_CERT_BOOTSTRAP_ENABLED) {
+    const grpcCertPem = await Bun.file(env.DELTIX_GRPC_TLS_CERT_PATH).text();
+    const httpCertPem = httpTlsEnabled
+      ? await Bun.file(env.DELTIX_HTTP_TLS_CERT_PATH as string).text()
+      : undefined;
+    const bootstrapService = new CertificateBootstrapService({ httpCertPem, grpcCertPem });
+    app.route('/api/v1/bootstrap', createCertificateBootstrapRouter(bootstrapService));
+    logger.info(
+      'Certificate bootstrap endpoint enabled at /api/v1/bootstrap/certificate (unauthenticated, rate-limited)',
+    );
   }
 
   const httpPort = Number(Bun.env.HTTP_PORT ?? 9090);
