@@ -9,6 +9,45 @@ Each entry starts with a **plain-language summary** (what changed, in
 everyday words) before any technical detail — written so someone outside
 engineering can understand what shipped and why it matters.
 
+## [0.5.2] - 2026-08-28
+
+**In plain terms:** the previous installer (`install.sh` / `get-deltix.sh`)
+looked successful but silently produced a server that could never actually
+start — it never generated the license, the JWT signing keys, the
+mandatory gRPC certificate, or the anti-tamper commit log the server
+requires to boot, and it wrote configuration under the wrong variable
+names entirely. This was only caught by testing the installer against a
+real, disposable Ubuntu virtual machine end to end (not just checking
+that the install script "finished without errors"). It is now fixed and
+was re-verified the same way: a clean VM, the real one-line installer, a
+running service, and a real HTTP response from the Admin UI.
+
+- **Fixed:** `scripts/install.sh` now generates a self-signed Community
+  license, an Ed25519 JWT signing keypair, a mandatory gRPC TLS
+  certificate, and initializes the Dolt anti-tamper commit log on first
+  install, then writes the complete, correctly-named set of `DELTIX_*`
+  environment variables the server actually requires to boot (see
+  `src/shared/env.ts`). Previously it wrote an unrelated set of `APP_*`
+  variables and none of the required secrets, so every service start
+  failed with a configuration validation error.
+- **Added:** `scripts/generate-community-license.ts` and
+  `scripts/generate-jwt-keypair.ts` — standalone, production-safe
+  generators (no test fixtures involved) used by the installer and
+  reusable directly by operators who need to rotate keys manually.
+- **Fixed:** `scripts/install-windows.ps1` had the same class of bug, plus
+  an additional one specific to Windows: the generated `deltix.env` file
+  was never actually loaded into the service process (Windows services
+  have no equivalent of systemd's `EnvironmentFile=`). The Windows
+  installer now generates the same secrets as the Linux installer and its
+  service launcher correctly loads every variable — including multi-line
+  PEM keys — into the process environment before starting the server.
+- **Verification:** re-ran the entire install end to end inside a real,
+  disposable systemd-enabled container simulating a clean Ubuntu VM: the
+  service starts, the license validates, the gRPC transfer engine and
+  Admin UI both come up, and re-running the installer (upgrade path)
+  correctly leaves existing secrets untouched instead of regenerating
+  them.
+
 ## [0.5.1] - 2026-08-28
 
 **In plain terms:** you no longer have to `git clone` the repository or

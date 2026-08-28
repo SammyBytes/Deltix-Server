@@ -297,6 +297,55 @@ if ($tlsMode -eq "self-signed") {
 # ------------------------------------------------------------------------------
 $configFile = "$DataDir\config\config.json"
 $envFile = "$DataDir\config\deltix.env"
+$doltLicenseLogPath = "$DataDir\dolt-license-log"
+$grpcCertsDir = "$DataDir\certs\grpc"
+
+# ------------------------------------------------------------------------------
+# Cryptographic material & anti-tamper log (generated once; never
+# regenerated on an upgrade re-run). Mirrors scripts/install.sh: the
+# server refuses to boot without a real DELTIX_LICENSE_KEY,
+# DELTIX_JWT_PRIVATE_KEY/PUBLIC_KEY, DELTIX_DOLT_REPO_PATH, and a mandatory
+# gRPC TLS cert (see src/shared/env.ts) -- none of this can be deferred to
+# "edit deltix.env by hand later".
+# ------------------------------------------------------------------------------
+if (-not (Test-Path $envFile)) {
+    Log-Info "Generating JWT signing keypair (Ed25519)..."
+    Push-Location $InstallDir
+    try {
+        $jwtSnippet = & $BunPath run scripts/generate-jwt-keypair.ts
+    } finally {
+        Pop-Location
+    }
+
+    Log-Info "Generating a self-signed Community license..."
+    Push-Location $InstallDir
+    try {
+        $licenseSnippet = & $BunPath run scripts/generate-community-license.ts "$env:COMPUTERNAME"
+    } finally {
+        Pop-Location
+    }
+
+    $grpcTlsHostname = if ($tlsHostname) { $tlsHostname } else { $env:COMPUTERNAME }
+    Log-Info "Generating the mandatory gRPC transfer engine TLS certificate..."
+    Push-Location $InstallDir
+    try {
+        & $BunPath run scripts/generate-server-tls-cert.ts $grpcTlsHostname $grpcCertsDir
+    } finally {
+        Pop-Location
+    }
+
+    Log-Info "Initializing the Dolt anti-tamper commit log at $doltLicenseLogPath..."
+    New-Item -ItemType Directory -Path $doltLicenseLogPath -Force | Out-Null
+    dolt config --global --add user.name deltix-server 2>$null | Out-Null
+    dolt config --global --add user.email deltix-server@localhost 2>$null | Out-Null
+    Push-Location $doltLicenseLogPath
+    try {
+        dolt init | Out-Null
+    } finally {
+        Pop-Location
+    }
+}
+
 
 if (-not (Test-Path $configFile)) {
     Log-Info "Generating production configuration: $configFile"
@@ -359,35 +408,80 @@ if (-not (Test-Path $configFile)) {
 
 if (-not (Test-Path $envFile)) {
     Log-Info "Generating environment configuration: $envFile"
-    $envContent = @"
-# Deltix Windows Environment Configuration
-NODE_ENV=production
-APP_ENV=production
-APP_CONFIG_PATH=$configFile
-APP_DATA_DIR=$DataDir
-APP_PORT=$HttpPort
-APP_GRPC_PORT=$GrpcPort
-APP_ADMIN_UI_ENABLED=true
-APP_LOG_LEVEL=info
-APP_LOG_PRETTY=false
-"@
-    Set-Content -Path $envFile -Value $envContent -Encoding UTF8
+    $doltRepoPathForward = $doltLicenseLogPath.Replace('\', '/')
+    $grpcCertsDirForward = $grpcCertsDir.Replace('\', '/')
+    $envLines = New-Object System.Collections.Generic.List[string]
+    $envLines.Add("# Deltix Environment Configuration -- generated once by scripts/install-windows.ps1.")
+    $envLines.Add("# Do not regenerate by hand; re-running the installer preserves this file.")
+    $envLines.Add("NODE_ENV=production")
+    $envLines.Add("APP_CONFIG_PATH=$configFile")
+    $envLines.Add("APP_PORT=$HttpPort")
+    $envLines.Add("")
+    $envLines.Add("# --- Licensing (self-signed Community tier; no internet dependency) ---")
+    $envLines.Add($licenseSnippet.Trim())
+    $envLines.Add("DELTIX_DOLT_REPO_PATH=$doltRepoPathForward")
+    $envLines.Add("")
+    $envLines.Add("# --- Session/access token signing ---")
+    $envLines.Add($jwtSnippet.Trim())
+    $envLines.Add("")
+    $envLines.Add("# --- Data storage (all under $DataDir, kept separate from $InstallDir) ---")
+    $envLines.Add("DELTIX_USER_DB_PATH=$escapedDataDir/db/users.db")
+    $envLines.Add("DELTIX_SESSION_DB_PATH=$escapedDataDir/db/sessions.db")
+    $envLines.Add("DELTIX_TICKET_DB_PATH=$escapedDataDir/db/transfer-tickets.db")
+    $envLines.Add("DELTIX_TRANSFER_JOB_DB_PATH=$escapedDataDir/db/transfer-jobs.db")
+    $envLines.Add("DELTIX_ADDON_TRUST_DB_PATH=$escapedDataDir/db/addon-trust.db")
+    $envLines.Add("DELTIX_REPO_DB_PATH=$escapedDataDir/db/repos.db")
+    $envLines.Add("DELTIX_STAGING_ROOT_PATH=$escapedDataDir/staging")
+    $envLines.Add("DELTIX_DOLT_REPOS_ROOT_PATH=$escapedDataDir/repos")
+    $envLines.Add("DELTIX_NAS_SIM_PATH=$escapedDataDir/nas-sim")
+    $envLines.Add("")
+    $envLines.Add("# --- gRPC transfer engine (mandatory TLS, self-signed cert generated above) ---")
+    $envLines.Add("DELTIX_GRPC_PORT=$GrpcPort")
+    $envLines.Add("DELTIX_GRPC_TLS_CERT_PATH=$grpcCertsDirForward/server.crt")
+    $envLines.Add("DELTIX_GRPC_TLS_KEY_PATH=$grpcCertsDirForward/server.key")
+    $envLines.Add("")
+    $envLines.Add("# --- Admin Web UI / HTTP control plane ---")
+    $envLines.Add("DELTIX_ADMIN_UI_ENABLED=true")
+    $envLines.Add("DELTIX_CORS_ALLOWED_ORIGINS=")
+    if ($tlsMode -ne "none") {
+        $envLines.Add("DELTIX_HTTP_TLS_CERT_PATH=$resolvedTlsCertPath")
+        $envLines.Add("DELTIX_HTTP_TLS_KEY_PATH=$resolvedTlsKeyPath")
+    }
+    Set-Content -Path $envFile -Value ($envLines -join "`r`n") -Encoding UTF8
 }
 
 # ------------------------------------------------------------------------------
 # Create Windows Service Launcher Script
 # ------------------------------------------------------------------------------
-$launcherScript = "$InstallDir\start-service.cmd"
-$launcherContent = @"
-@echo off
-setlocal
-cd /d "$InstallDir"
-set "NODE_ENV=production"
-set "APP_CONFIG_PATH=$configFile"
-set "APP_DATA_DIR=$DataDir"
-"$BunPath" run src/index.ts
-"@
-Set-Content -Path $launcherScript -Value $launcherContent -Encoding ASCII
+# sc.exe-registered services do NOT read an EnvironmentFile the way systemd
+# does -- nothing on Windows loads deltix.env into the process automatically.
+# The launcher must parse it itself (KEY=value, and KEY="multi-line PEM")
+# and set each variable in-process before starting the server, otherwise the
+# service starts with none of the required DELTIX_* variables and crashes
+# on boot exactly like the pre-fix Linux installer did.
+$launcherScript = "$InstallDir\start-service.ps1"
+$launcherContent = @'
+$ErrorActionPreference = "Stop"
+Set-Location -Path "__INSTALL_DIR__"
+$env:NODE_ENV = "production"
+$env:APP_DATA_DIR = "__DATA_DIR__"
+
+$envFilePath = "__ENV_FILE__"
+$raw = Get-Content -Path $envFilePath -Raw
+$pattern = '(?ms)^([A-Za-z_][A-Za-z0-9_]*)=(?:"([^"]*)"|([^\r\n]*))$'
+foreach ($match in [System.Text.RegularExpressions.Regex]::Matches($raw, $pattern)) {
+    $name = $match.Groups[1].Value
+    $value = if ($match.Groups[2].Success) { $match.Groups[2].Value } else { $match.Groups[3].Value }
+    [System.Environment]::SetEnvironmentVariable($name, $value, "Process")
+}
+
+& "__BUN_PATH__" run src/index.ts
+'@
+$launcherContent = $launcherContent.Replace('__INSTALL_DIR__', $InstallDir).Replace('__DATA_DIR__', $DataDir).Replace('__ENV_FILE__', $envFile).Replace('__BUN_PATH__', $BunPath)
+Set-Content -Path $launcherScript -Value $launcherContent -Encoding UTF8
+$launcherCmd = "$InstallDir\start-service.cmd"
+Set-Content -Path $launcherCmd -Value "@echo off`r`npowershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$launcherScript`"" -Encoding ASCII
+$launcherScript = $launcherCmd
 Log-Info "Created service launcher script: $launcherScript"
 
 # ------------------------------------------------------------------------------

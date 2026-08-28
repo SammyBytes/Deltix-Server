@@ -340,6 +340,42 @@ fi
 # ------------------------------------------------------------------------------
 CONFIG_FILE="${CONFIG_DIR}/config.json"
 ENV_FILE="${CONFIG_DIR}/deltix.env"
+JWT_KEYPAIR_SNIPPET="${DATA_DIR}/keys/.jwt-env-snippet"
+LICENSE_SNIPPET="${DATA_DIR}/keys/.license-env-snippet"
+DOLT_LICENSE_LOG_PATH="${DATA_DIR}/dolt-license-log"
+GRPC_CERTS_DIR="${DATA_DIR}/certs/grpc"
+
+# ------------------------------------------------------------------------------
+# Cryptographic Material & Anti-Tamper Log (only generated once, never
+# regenerated on an upgrade re-run -- this is what previously made
+# deltix.env boot-broken: it only ever contained APP_* variables the
+# server does not read, never the DELTIX_* secrets src/shared/env.ts
+# requires at boot (license, JWT signing keys, gRPC mTLS cert, the Dolt
+# anti-tamper commit log). None of this can be deferred to "edit .env by
+# hand later" without breaking the installer's own promise of zero
+# manual configuration steps.
+# ------------------------------------------------------------------------------
+if [ ! -f "${ENV_FILE}" ]; then
+  log_info "Generating JWT signing keypair (Ed25519)..."
+  (cd "${INSTALL_DIR}" && "${BUN_BIN}" run scripts/generate-jwt-keypair.ts) > "${JWT_KEYPAIR_SNIPPET}"
+
+  log_info "Generating a self-signed Community license..."
+  (cd "${INSTALL_DIR}" && "${BUN_BIN}" run scripts/generate-community-license.ts "$(hostname -f 2>/dev/null || hostname)") > "${LICENSE_SNIPPET}"
+
+  log_info "Generating the mandatory gRPC transfer engine TLS certificate..."
+  GRPC_TLS_HOSTNAME="${GRPC_TLS_HOSTNAME:-${TLS_HOSTNAME:-$(hostname -f 2>/dev/null || hostname)}}"
+  (cd "${INSTALL_DIR}" && "${BUN_BIN}" run scripts/generate-server-tls-cert.ts "${GRPC_TLS_HOSTNAME}" "${GRPC_CERTS_DIR}")
+
+  log_info "Initializing the Dolt anti-tamper commit log at ${DOLT_LICENSE_LOG_PATH}..."
+  mkdir -p "${DOLT_LICENSE_LOG_PATH}"
+  dolt config --global --add user.name deltix-server >/dev/null 2>&1 || true
+  dolt config --global --add user.email deltix-server@localhost >/dev/null 2>&1 || true
+  (cd "${DOLT_LICENSE_LOG_PATH}" && dolt init) >/dev/null
+
+  chown -R "${SERVICE_USER}:${SERVICE_GROUP}" "${DOLT_LICENSE_LOG_PATH}" "${GRPC_CERTS_DIR}" "${DATA_DIR}/keys"
+  chmod 600 "${JWT_KEYPAIR_SNIPPET}" "${LICENSE_SNIPPET}"
+  chmod 640 "${GRPC_CERTS_DIR}/server.crt" "${GRPC_CERTS_DIR}/server.key"
+fi
 
 if [ ! -f "${CONFIG_FILE}" ]; then
   log_info "Generating initial configuration: ${CONFIG_FILE}"
@@ -398,18 +434,45 @@ fi
 
 if [ ! -f "${ENV_FILE}" ]; then
   log_info "Generating environment variables file: ${ENV_FILE}"
-  cat <<EOF > "${ENV_FILE}"
-# Deltix Environment Configuration
-NODE_ENV=production
-APP_ENV=production
-APP_CONFIG_PATH=${CONFIG_FILE}
-APP_DATA_DIR=${DATA_DIR}
-APP_PORT=${HTTP_PORT}
-APP_GRPC_PORT=${GRPC_PORT}
-APP_ADMIN_UI_ENABLED=true
-APP_LOG_LEVEL=info
-APP_LOG_PRETTY=false
-EOF
+  {
+    echo "# Deltix Environment Configuration -- generated once by scripts/install.sh."
+    echo "# Do not regenerate by hand; re-running the installer preserves this file."
+    echo "NODE_ENV=production"
+    echo "APP_CONFIG_PATH=${CONFIG_FILE}"
+    echo "APP_PORT=${HTTP_PORT}"
+    echo ""
+    echo "# --- Licensing (self-signed Community tier; no internet dependency) ---"
+    cat "${LICENSE_SNIPPET}"
+    echo "DELTIX_DOLT_REPO_PATH=${DOLT_LICENSE_LOG_PATH}"
+    echo ""
+    echo "# --- Session/access token signing ---"
+    cat "${JWT_KEYPAIR_SNIPPET}"
+    echo ""
+    echo "# --- Data storage (all under ${DATA_DIR}, kept separate from ${INSTALL_DIR}) ---"
+    echo "DELTIX_USER_DB_PATH=${DATA_DIR}/db/users.db"
+    echo "DELTIX_SESSION_DB_PATH=${DATA_DIR}/db/sessions.db"
+    echo "DELTIX_TICKET_DB_PATH=${DATA_DIR}/db/transfer-tickets.db"
+    echo "DELTIX_TRANSFER_JOB_DB_PATH=${DATA_DIR}/db/transfer-jobs.db"
+    echo "DELTIX_ADDON_TRUST_DB_PATH=${DATA_DIR}/db/addon-trust.db"
+    echo "DELTIX_REPO_DB_PATH=${DATA_DIR}/db/repos.db"
+    echo "DELTIX_STAGING_ROOT_PATH=${DATA_DIR}/staging"
+    echo "DELTIX_DOLT_REPOS_ROOT_PATH=${DATA_DIR}/repos"
+    echo "DELTIX_NAS_SIM_PATH=${DATA_DIR}/nas-sim"
+    echo ""
+    echo "# --- gRPC transfer engine (mandatory mTLS, self-signed cert generated above) ---"
+    echo "DELTIX_GRPC_PORT=${GRPC_PORT}"
+    echo "DELTIX_GRPC_TLS_CERT_PATH=${GRPC_CERTS_DIR}/server.crt"
+    echo "DELTIX_GRPC_TLS_KEY_PATH=${GRPC_CERTS_DIR}/server.key"
+    echo ""
+    echo "# --- Admin Web UI / HTTP control plane ---"
+    echo "DELTIX_ADMIN_UI_ENABLED=true"
+    echo "DELTIX_CORS_ALLOWED_ORIGINS="
+    if [ "${TLS_MODE}" != "none" ]; then
+      echo "DELTIX_HTTP_TLS_CERT_PATH=${RESOLVED_TLS_CERT_PATH}"
+      echo "DELTIX_HTTP_TLS_KEY_PATH=${RESOLVED_TLS_KEY_PATH}"
+    fi
+  } > "${ENV_FILE}"
+  rm -f "${JWT_KEYPAIR_SNIPPET}" "${LICENSE_SNIPPET}"
   chmod 600 "${ENV_FILE}"
   chown "${SERVICE_USER}:${SERVICE_GROUP}" "${ENV_FILE}"
 fi
