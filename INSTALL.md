@@ -41,29 +41,52 @@ administrator account through the Admin Web UI on first visit.
 
 ### Steps
 
-The GitHub Release for a given tag only carries standalone tool binaries
-(such as the TLS certificate generator), not a packaged server tarball.
-To install a specific version, fetch the tagged **source** instead, using
-either of these two options:
+**Option A — one-line bootstrap (fastest, recommended):**
 
-**Option A — clone with git (recommended):**
+Each GitHub Release attaches a `deltix-server-<version>.tar.gz` source
+tarball as an asset. `scripts/get-deltix.sh` downloads the latest one (or
+a version you pin) and hands off to the installer automatically:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/SammyBytes/Deltix-Server/main/scripts/get-deltix.sh | sudo bash
+```
+
+To pin a specific version instead of the latest release:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/SammyBytes/Deltix-Server/main/scripts/get-deltix.sh | sudo VERSION=0.5.0 bash
+```
+
+Note: because standard input is consumed by the pipe, a piped run always
+falls back to an unattended install with default ports and no TLS (the
+same auto-detection `scripts/install.sh` already applies whenever stdin
+isn't a real terminal). If you want the interactive port/TLS wizard,
+download the bootstrap script first and run it as a normal local script
+instead of piping it:
+
+```bash
+curl -fsSL -o get-deltix.sh https://raw.githubusercontent.com/SammyBytes/Deltix-Server/main/scripts/get-deltix.sh
+sudo bash get-deltix.sh
+```
+
+**Option B — clone with git:**
 
 ```bash
 git clone --branch v0.5.0 --depth 1 https://github.com/SammyBytes/Deltix-Server.git
 cd Deltix-Server
 ```
 
-**Option B — download the tagged source archive (no git required):**
+**Option C — download the release tarball directly (no git required):**
 
 ```bash
-curl -L -o deltix-server-v0.5.0.tar.gz \
-  https://github.com/SammyBytes/Deltix-Server/archive/refs/tags/v0.5.0.tar.gz
-tar xzf deltix-server-v0.5.0.tar.gz
-cd Deltix-Server-0.5.0
+curl -L -o deltix-server-0.5.0.tar.gz \
+  https://github.com/SammyBytes/Deltix-Server/releases/download/v0.5.0/deltix-server-0.5.0.tar.gz
+tar xzf deltix-server-0.5.0.tar.gz
+cd deltix-server-0.5.0
 ```
 
-Replace `v0.5.0` with the release you want to install. Then, from the
-repository root:
+Replace `0.5.0` with the release you want to install. With options B or C,
+run the installer yourself from the repository root:
 
 ```bash
 sudo ./scripts/install.sh
