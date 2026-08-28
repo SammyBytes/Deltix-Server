@@ -891,3 +891,11 @@ export async function runCli(argv: string[]): Promise<number> {
   const flags = parseCliFlags(args);
   return dispatchCliCommand(command, args, flags);
 }
+
+// Required so `bun run src/cli/commands.ts <command>` (or a compiled standalone
+// binary) actually executes the CLI; without this guard the module only defines
+// functions and exits silently with code 0.
+if (import.meta.main) {
+  const exitCode = await runCli(process.argv);
+  process.exit(exitCode);
+}

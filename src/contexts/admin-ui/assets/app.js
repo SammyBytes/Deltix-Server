@@ -97,7 +97,22 @@ function iconButton(iconSvgPath, title, extraClass) {
 
 function withViewTransition(mutate) {
   if (typeof document.startViewTransition === 'function') {
-    document.startViewTransition(() => mutate());
+    // startViewTransition can throw synchronously (a transition is already
+    // running) or, on newer Chromium, return a promise that rejects with
+    // AbortError when the transition is skipped/interrupted. Attach a catch so
+    // rejected transitions are not logged as "Uncaught (in promise)"; the DOM
+    // mutation still runs inside the callback.
+    try {
+      const transition = document.startViewTransition(() => {
+        mutate();
+      });
+      const finished = transition && transition.finished ? transition.finished : transition;
+      if (finished && typeof finished.catch === 'function') {
+        finished.catch(() => {});
+      }
+    } catch {
+      mutate();
+    }
   } else {
     mutate();
   }

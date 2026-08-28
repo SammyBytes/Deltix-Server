@@ -9,6 +9,46 @@ Each entry starts with a **plain-language summary** (what changed, in
 everyday words) before any technical detail — written so someone outside
 engineering can understand what shipped and why it matters.
 
+## [0.6.2] - 2026-08-28
+
+**In plain terms:** this patch makes it possible to actually *see* what is
+wrong with a server when something misbehaves. The built-in diagnostic
+commands (status, doctor, config) silently did nothing when you ran them —
+they printed nothing at all, which made it look like there were no logs or
+tools available to investigate a problem. Now they work and print a full
+report. It also removes a spurious "Transition was skipped" error that cluttered
+the admin panel's browser console when you switched screens, and makes the
+server's automated test suite much more reliable on slow or busy machines, so
+a green checkmark in CI genuinely means the software works.
+
+### Fixed
+
+- **Diagnostic CLI (`status`, `doctor`, `config export`) was a no-op**: the
+  `runCli` entry point in `src/cli/commands.ts` was defined but never invoked
+  (there was no `import.meta.main` guard), so `bun run src/cli/commands.ts doctor`
+  — the exact command documented for production troubleshooting — exited 0 with
+  zero output. The module is now a proper CLI entry point: `import.meta.main`
+  invokes `runCli(process.argv)` and propagates the exit code.
+- **Admin UI threw `Uncaught (in promise) AbortError: Transition was skipped`**
+  in the browser console when a screen transition was interrupted (e.g. quickly
+  switching tabs). `withViewTransition` ignored the promise returned by
+  `document.startViewTransition()`, so the rejection was unhandled. It now
+  attaches a catch and falls back to a plain DOM update if a transition throws.
+- **Flaky smoke tests under parallel load**: Bun's default per-test timeout is
+  5000 ms, but the boot smoke tests launch a full server subprocess and can
+  exceed that when 15 suites boot simultaneously, timing out the `beforeAll`
+  hook even though the server was fine. `test:smoke` now runs with
+  `--timeout=90000`.
+
+### Tests
+
+- Locally verified: unit **259 pass / 0 fail**, smoke **34 pass / 0 fail** with
+  the new timeout (previously 3-4 suites failed intermittently under parallel
+  load), lint clean (0 errors; 81 pre-existing `noConsole` warnings in the CLI).
+- CI and CD re-run the full suite (unit + integration + smoke) as a hard gate
+  on every push and before publishing, so the timeout fix is exercised on
+  GitHub Actions as well (`test:smoke` now carries `--timeout=90000`).
+
 ## [0.6.1] - 2026-08-28
 
 **In plain terms:** this patch makes the Admin Web UI tell the truth about
