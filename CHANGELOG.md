@@ -9,6 +9,49 @@ Each entry starts with a **plain-language summary** (what changed, in
 everyday words) before any technical detail — written so someone outside
 engineering can understand what shipped and why it matters.
 
+## [0.6.9] - 2026-08-28
+
+**In plain terms:** the previous fix for the empty-tables-after-login bug
+turned out to be incomplete. The dashboard could still show empty tables
+right after you logged in — again for exactly the same symptom (data only
+reappearing after a write action) — but this time the cause was different and
+even sneakier: modern Chrome/Edge defer the page's fancy cross-fade animation
+for one frame, and the code decided whether to load your data *while that
+animation was still pending*, so it never did. This release makes the data
+load independent of the animation timing and adds a regression test that
+reproduces the exact Chrome timing behaviour.
+
+### Fixed
+
+- **Dashboard still loaded empty in real Chrome/Edge even though the v0.6.8
+  fix was in place**: `showSession()` set `currentIsGlobalAdmin` inside the
+  `document.startViewTransition()` update callback, but Chromium defers that
+  callback by one frame. The synchronous `if (currentIsGlobalAdmin)` that
+  guards the initial data load therefore ran while the flag was still `false`,
+  skipping `loadUsers`/`loadTrustedAddons`/`loadReposAndDirectory` entirely
+  until a later write retriggered a fetch. The `#hash` tab navigation also
+  started a *second* view transition while the first was still active, which
+  Chromium aborts with `AbortError: Transition was skipped`. Now the session
+  state is committed synchronously *before* the (purely visual) view
+  transition, the hash-based tab switch toggles the tab directly instead of
+  starting a nested transition, and `withViewTransition` also swallows the
+  `updateCallbackDone`/`ready` rejections that Chromium fires for
+  skipped/interrupted transitions — so a cosmetic animation can never block
+  the data load again (in any browser).
+- **Logout could be affected by the same timing race**: `showForm()` also
+  cleared the session state inside the deferred transition callback; the state
+  is now reset synchronously before the visual transition.
+
+### Tests
+
+- Added `tests/unit/admin-ui/app-data-load.test.ts`, which runs the real
+  `app.js` through a DOM harness with a **deferred** `startViewTransition`
+  (reproducing Chromium's one-frame delay) and asserts the initial data
+  fetches fire after login. Against v0.6.8 the deferred-mode test FAILS with
+  only `POST /api/v1/auth/login` observed — the exact user symptom; against
+  this release it PASSES in both deferred and synchronous modes. Unit suite:
+  261 pass / 0 fail; lint clean for the changed files.
+
 ## [0.6.8] - 2026-08-28
 
 **In plain terms:** a serious bug could leave the Admin Web UI showing empty

@@ -110,6 +110,14 @@ function withViewTransition(mutate) {
       if (finished && typeof finished.catch === 'function') {
         finished.catch(() => {});
       }
+      // Chromium aborts skipped/interrupted transitions on updateCallbackDone
+      // and ready with AbortError; silence those too so the console stays clean.
+      if (transition && transition.updateCallbackDone && typeof transition.updateCallbackDone.catch === 'function') {
+        transition.updateCallbackDone.catch(() => {});
+      }
+      if (transition && transition.ready && typeof transition.ready.catch === 'function') {
+        transition.ready.catch(() => {});
+      }
     } catch {
       mutate();
     }
@@ -237,16 +245,20 @@ function cssSafe(value) {
 }
 
 // Tab Switching System
+function applyTab(targetTabId) {
+  navTabs.forEach((tab) => {
+    const isActive = tab.getAttribute('data-target') === targetTabId;
+    tab.classList.toggle('active', isActive);
+  });
+  tabContents.forEach((content) => {
+    const isTarget = content.id === targetTabId;
+    content.classList.toggle('active', isTarget);
+  });
+}
+
 function switchTab(targetTabId) {
   withViewTransition(() => {
-    navTabs.forEach((tab) => {
-      const isActive = tab.getAttribute('data-target') === targetTabId;
-      tab.classList.toggle('active', isActive);
-    });
-    tabContents.forEach((content) => {
-      const isTarget = content.id === targetTabId;
-      content.classList.toggle('active', isTarget);
-    });
+    applyTab(targetTabId);
   });
   const hash = targetTabId.replace('tab-', '');
   window.location.hash = hash;
@@ -278,9 +290,14 @@ function applyGlobalAdminGating() {
 }
 
 function showSession(username, isGlobalAdmin) {
+  // IMPORTANT: state mutations that later code reads synchronously (global
+  // admin gating, data load) must happen OUTSIDE the view transition. Chromium
+  // defers the startViewTransition update callback by one frame, so code that
+  // reads currentIsGlobalAdmin immediately after withViewTransition() would
+  // still see the old value and skip the initial data population.
+  currentUsername = username;
+  currentIsGlobalAdmin = Boolean(isGlobalAdmin);
   withViewTransition(() => {
-    currentUsername = username;
-    currentIsGlobalAdmin = Boolean(isGlobalAdmin);
     if (loginView) loginView.classList.add('hidden');
     if (sessionPanel) sessionPanel.classList.remove('hidden');
     if (sessionUsername) sessionUsername.textContent = username;
@@ -288,10 +305,13 @@ function showSession(username, isGlobalAdmin) {
   });
   logAuditEvent('Session authenticated', { username: username, isGlobalAdmin: currentIsGlobalAdmin });
 
-  // Hash navigation check
+  // Hash navigation check. Toggle the tab directly: calling switchTab() here
+  // would start a SECOND view transition while the session transition above is
+  // still running, which Chromium aborts with "Transition was skipped".
   const hash = window.location.hash.replace('#', '');
   if (hash && document.getElementById('tab-' + hash)) {
-    switchTab('tab-' + hash);
+    applyTab('tab-' + hash);
+    window.location.hash = hash;
   }
 
   // Load data FIRST. Any exception in the (cosmetic, non-essential) tour or
@@ -324,10 +344,10 @@ function runNonCritical(task) {
 }
 
 function showForm() {
+  currentUsername = null;
+  currentIsGlobalAdmin = false;
+  accessToken = null;
   withViewTransition(() => {
-    currentUsername = null;
-    currentIsGlobalAdmin = false;
-    accessToken = null;
     if (sessionPanel) sessionPanel.classList.add('hidden');
     if (loginView) loginView.classList.remove('hidden');
     if (form) form.reset();
