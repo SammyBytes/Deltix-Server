@@ -7,7 +7,7 @@
       "**",
       "!**/*.html",
       "!src/contexts/admin-ui/assets/app.js",
-      "!src/contexts/admin-ui/assets/vendor/**"
+      "!src/contexts/admin-ui/assets/vendor"
     ]
   },
   "formatter": {

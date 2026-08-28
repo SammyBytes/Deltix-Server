@@ -2,9 +2,10 @@
 /**
  * Local demo/dev bootstrap script.
  *
- * Generates a throwaway .env with a valid license, JWT keypair, local admin
- * user (argon2id hash), and a real `dolt init`-ed repo — so a contributor
- * can `bun run dev` immediately without hand-crafting any secrets.
+ * Generates a throwaway .env with a valid license, JWT keypair, gRPC dev
+ * TLS cert, a global-admin bootstrap account, and a real `dolt init`-ed
+ * repo — so a contributor can `bun run dev` immediately and log in to the
+ * Admin Web UI without hand-crafting any secrets.
  *
  * Reuses the same test fixtures the automated test suite trusts
  * (tests/fixtures/license-fixtures.ts), so this script stays correct as the
@@ -14,9 +15,8 @@
  */
 import { mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { $ } from 'bun';
-import { hashPassword } from '../src/contexts/auth/password-authenticator';
 import {
   buildDefaultPayload,
   generateTestJwtKeypairPem,
@@ -28,20 +28,28 @@ const ADMIN_USERNAME = 'admin';
 const ADMIN_PASSWORD = 'demo1234';
 
 async function main() {
+  const dataDir = await mkdtemp(join(tmpdir(), 'deltix-local-demo-data-'));
   const repoPath = await mkdtemp(join(tmpdir(), 'deltix-local-demo-dolt-'));
   await $`dolt config --global --add user.name deltix-demo`.quiet().nothrow();
   await $`dolt config --global --add user.email deltix-demo@example.com`.quiet().nothrow();
   await $`dolt --data-dir ${repoPath} init`.quiet().nothrow();
+
+  // Reuses the same throwaway self-signed cert the gRPC transfer engine
+  // needs on every boot (dev or prod) -- without this, `bun run dev` fails
+  // fast with a Zod validation error before ever reaching the HTTP server.
+  const certDir = resolve('./certs/dev');
+  await $`bun run ${join(import.meta.dir, 'generate-dev-tls-certs.ts')} ${certDir}`
+    .quiet()
+    .nothrow();
+  const grpcTlsCertPath = join(certDir, 'server.crt');
+  const grpcTlsKeyPath = join(certDir, 'server.key');
 
   const { publicKeyBase64, privateKeyPem: licensePrivateKeyPem } = generateTestKeypair();
   const licenseKey = signLicensePayload(buildDefaultPayload(), licensePrivateKeyPem);
   const { privateKeyPem: jwtPrivateKeyPem, publicKeyPem: jwtPublicKeyPem } =
     generateTestJwtKeypairPem();
 
-  const passwordHash = await hashPassword(ADMIN_PASSWORD);
-  const localUsers = JSON.stringify([{ username: ADMIN_USERNAME, passwordHash }]);
-
-  const sessionDbPath = join(tmpdir(), 'deltix-local-demo-sessions.db');
+  const sessionDbPath = join(dataDir, 'sessions.db');
 
   const escapeNewlines = (pem: string) => pem.trim().replace(/\n/g, '\\n');
 
@@ -59,15 +67,32 @@ DELTIX_CLOCK_TOLERANCE_MS=5000
 
 DELTIX_JWT_PRIVATE_KEY="${escapeNewlines(jwtPrivateKeyPem)}"
 DELTIX_JWT_PUBLIC_KEY="${escapeNewlines(jwtPublicKeyPem)}"
-DELTIX_LOCAL_USERS='${localUsers.replace(/\$/g, '\\$')}'
+# Bootstrap admin (not DELTIX_LOCAL_USERS): this is the real production path
+# that grants isGlobalAdmin=true, so the Admin Web UI is actually reachable.
+DELTIX_BOOTSTRAP_ADMIN_USERNAME=${ADMIN_USERNAME}
+DELTIX_BOOTSTRAP_ADMIN_PASSWORD=${ADMIN_PASSWORD}
 DELTIX_SESSION_DB_PATH=${sessionDbPath}
 DELTIX_ACCESS_TOKEN_TTL_SECONDS=900
 DELTIX_SESSION_TTL_SECONDS=120
 DELTIX_CORS_ALLOWED_ORIGINS=http://127.0.0.1:9090
 DELTIX_ADMIN_UI_ENABLED=true
+DELTIX_GRPC_TLS_CERT_PATH=${grpcTlsCertPath}
+DELTIX_GRPC_TLS_KEY_PATH=${grpcTlsKeyPath}
+# Every stateful store gets its own fresh path per demo run (a previous
+# stale ./data/*.db left over from a prior run/version is exactly what
+# causes "the UI shows different users/repos than the API" confusion --
+# these all default to a relative ./data path if left unset).
+DELTIX_USER_DB_PATH=${join(dataDir, 'users.db')}
+DELTIX_TICKET_DB_PATH=${join(dataDir, 'transfer-tickets.db')}
+DELTIX_TRANSFER_JOB_DB_PATH=${join(dataDir, 'transfer-jobs.db')}
+DELTIX_ADDON_TRUST_DB_PATH=${join(dataDir, 'addon-trust.db')}
+DELTIX_REPO_DB_PATH=${join(dataDir, 'repos.db')}
 `;
 
   await Bun.write('.env', env);
+  console.log(
+    `Demo ready. Log in to the Admin Web UI with:\n  username: ${ADMIN_USERNAME}\n  password: ${ADMIN_PASSWORD}\n\nRun: bun run dev`,
+  );
 }
 
 main();

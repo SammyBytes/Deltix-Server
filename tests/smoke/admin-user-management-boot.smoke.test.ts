@@ -40,10 +40,15 @@ describe('admin user management smoke test', () => {
     const { privateKeyPem: jwtPrivateKeyPem, publicKeyPem: jwtPublicKeyPem } =
       generateTestJwtKeypairPem();
 
+    const sanitizedEnv = { ...process.env };
+    delete sanitizedEnv.DELTIX_BOOTSTRAP_ADMIN_USERNAME;
+    delete sanitizedEnv.DELTIX_BOOTSTRAP_ADMIN_PASSWORD;
+    delete sanitizedEnv.DELTIX_LOCAL_USERS;
+
     proc = Bun.spawn(['bun', 'run', ENTRYPOINT], {
       cwd: dataRoot,
       env: {
-        ...process.env,
+        ...sanitizedEnv,
         DELTIX_LICENSE_PUBLIC_KEY: publicKeyBase64,
         DELTIX_LICENSE_KEY: licenseKey,
         DELTIX_DOLT_REPO_PATH: repoPath,
@@ -64,7 +69,16 @@ describe('admin user management smoke test', () => {
       stderr: 'pipe',
     });
 
-    await new Promise((resolve) => setTimeout(resolve, 1500));
+    const deadline = Date.now() + 6000;
+    while (Date.now() < deadline) {
+      try {
+        const res = await fetch(`http://127.0.0.1:${httpPort}/status`);
+        if (res.status === 200) break;
+      } catch {
+        // Server still booting
+      }
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
   });
 
   afterAll(async () => {

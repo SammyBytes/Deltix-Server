@@ -41,9 +41,16 @@ async function spawnServer(
   const certDir = await mkdtemp(join(tmpdir(), 'deltix-grpc-certs-admin-'));
   const { certPath, keyPath } = await generateSelfSignedCert(certDir);
 
+  const sanitizedEnv = { ...process.env };
+  delete sanitizedEnv.DELTIX_ADMIN_UI_ENABLED;
+  delete sanitizedEnv.DELTIX_BOOTSTRAP_ADMIN_USERNAME;
+  delete sanitizedEnv.DELTIX_BOOTSTRAP_ADMIN_PASSWORD;
+
+  const dummyCwd = await mkdtemp(join(tmpdir(), 'deltix-admin-smoke-cwd-'));
   const proc = Bun.spawn(['bun', 'run', ENTRYPOINT], {
+    cwd: dummyCwd,
     env: {
-      ...process.env,
+      ...sanitizedEnv,
       DELTIX_LICENSE_PUBLIC_KEY: publicKeyBase64,
       DELTIX_LICENSE_KEY: licenseKey,
       DELTIX_DOLT_REPO_PATH: repoPath,
@@ -63,7 +70,16 @@ async function spawnServer(
     stderr: 'pipe',
   });
 
-  await new Promise((resolve) => setTimeout(resolve, 1200));
+  const deadline = Date.now() + 6000;
+  while (Date.now() < deadline) {
+    try {
+      const res = await fetch(`http://127.0.0.1:${httpPort}/status`);
+      if (res.status === 200) break;
+    } catch {
+      // Server still booting
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
   return proc;
 }
 

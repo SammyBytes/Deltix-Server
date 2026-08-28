@@ -8,204 +8,609 @@
   <link rel="stylesheet" href="/admin/vendor/tailwind.css" />
   <link rel="stylesheet" href="/admin/vendor/driver.css" />
   <style>
+    /* Monochromatic smoothness and transitions */
+    * {
+      border-color: rgba(38, 38, 38, 0.8);
+      scrollbar-width: thin;
+      scrollbar-color: #262626 #0a0a0a;
+    }
+    
     ::view-transition-old(root),
     ::view-transition-new(root) {
-      animation-duration: 240ms;
-      animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
-    }
-    ::view-transition-old(user-row),
-    ::view-transition-new(user-row),
-    ::view-transition-old(trust-row),
-    ::view-transition-new(trust-row) {
       animation-duration: 200ms;
+      animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
     }
-    [data-vt="user-row"],
-    [data-vt="trust-row"] {
-      view-transition-name: var(--vt-name, none);
+    
+    .tab-content {
+      display: none;
+      opacity: 0;
+      transition: opacity 180ms ease-out, transform 180ms ease-out;
+      transform: translateY(4px);
+    }
+    
+    .tab-content.active {
+      display: block;
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    .nav-tab {
+      transition: all 150ms cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    .nav-tab.active {
+      background-color: #262626;
+      color: #fafafa;
+      border-color: #404040;
+    }
+
+    .toast-container {
+      position: fixed;
+      bottom: 1.5rem;
+      right: 1.5rem;
+      z-index: 50;
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+      pointer-events: none;
+    }
+
+    .toast-item {
+      pointer-events: auto;
+      background: #171717;
+      border: 1px solid #262626;
+      color: #ededed;
+      padding: 0.75rem 1rem;
+      border-radius: 0.5rem;
+      font-size: 0.875rem;
+      box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5);
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      animation: toastSlideIn 200ms cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    @keyframes toastSlideIn {
+      from { transform: translateY(12px); opacity: 0; }
+      to { transform: translateY(0); opacity: 1; }
     }
   </style>
 </head>
-<body class="min-h-full bg-neutral-950 p-3 text-neutral-100 sm:p-6">
-  <main id="app-panel" class="mx-auto w-full max-w-5xl rounded-lg border border-neutral-800 bg-neutral-900 p-4 shadow-xl sm:p-6">
-    <section id="login-view" class="mx-auto max-w-sm">
-      <h1 class="mb-1 text-lg font-semibold">Deltix Admin</h1>
-      <p class="mb-6 text-sm text-neutral-400">Sign in with your local Deltix account.</p>
-      <form id="login-form" class="space-y-4" data-driver="login-form">
-        <div>
-          <label for="username" class="mb-1 block text-xs font-medium text-neutral-300">Username</label>
-          <input id="username" name="username" type="text" autocomplete="username" required class="w-full rounded-md border border-neutral-700 bg-neutral-950 px-3 py-2 text-sm outline-none focus:border-neutral-400 focus:ring-2 focus:ring-neutral-600" />
+<body class="min-h-full bg-neutral-950 text-neutral-200 antialiased selection:bg-neutral-800 selection:text-neutral-100 flex flex-col justify-between">
+
+  <!-- Toast Notification Outlet -->
+  <div id="toast-outlet" class="toast-container" aria-live="polite"></div>
+
+  <!-- App Wrapper -->
+  <div class="flex-1 w-full max-w-6xl mx-auto p-4 sm:p-6 lg:p-8 flex flex-col gap-6">
+
+    <!-- ==================== LOGIN VIEW ==================== -->
+    <section id="login-view" class="my-auto mx-auto w-full max-w-md py-12">
+      <div class="rounded-2xl border border-neutral-800 bg-neutral-900/70 backdrop-blur-sm p-8 shadow-2xl space-y-6">
+        <div class="space-y-2">
+          <div class="inline-flex items-center gap-2 px-2.5 py-1 rounded-md bg-neutral-800 border border-neutral-700 text-xs font-mono text-neutral-300">
+            <span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+            Deltix Control Plane
+          </div>
+          <h1 class="text-2xl font-semibold tracking-tight text-neutral-100">Sign in to Deltix</h1>
+          <p class="text-sm text-neutral-400">Enter your administrator or operator credentials to continue.</p>
         </div>
-        <div>
-          <label for="password" class="mb-1 block text-xs font-medium text-neutral-300">Password</label>
-          <input id="password" name="password" type="password" autocomplete="current-password" required class="w-full rounded-md border border-neutral-700 bg-neutral-950 px-3 py-2 text-sm outline-none focus:border-neutral-400 focus:ring-2 focus:ring-neutral-600" />
-        </div>
-        <button type="submit" class="w-full rounded-md bg-neutral-100 px-3 py-2 text-sm font-medium text-neutral-900 hover:bg-white focus:outline-none focus:ring-2 focus:ring-neutral-500">Sign in</button>
-        <p id="error-message" class="hidden text-sm text-red-400" role="alert"></p>
-      </form>
+
+        <form id="login-form" class="space-y-4" data-driver="login-form">
+          <div class="space-y-1.5">
+            <label for="username" class="block text-xs font-medium text-neutral-300">Username</label>
+            <input id="username" name="username" type="text" autocomplete="username" required
+              placeholder="e.g. admin"
+              class="w-full rounded-lg border border-neutral-800 bg-neutral-950 px-3.5 py-2.5 text-sm text-neutral-100 placeholder-neutral-600 outline-none transition focus:border-neutral-500 focus:ring-1 focus:ring-neutral-500" />
+          </div>
+
+          <div class="space-y-1.5">
+            <label for="password" class="block text-xs font-medium text-neutral-300">Password</label>
+            <input id="password" name="password" type="password" autocomplete="current-password" required
+              placeholder="••••••••"
+              class="w-full rounded-lg border border-neutral-800 bg-neutral-950 px-3.5 py-2.5 text-sm text-neutral-100 placeholder-neutral-600 outline-none transition focus:border-neutral-500 focus:ring-1 focus:ring-neutral-500" />
+          </div>
+
+          <button type="submit"
+            class="w-full rounded-lg bg-neutral-100 px-4 py-2.5 text-sm font-medium text-neutral-950 hover:bg-white focus:outline-none focus:ring-2 focus:ring-neutral-400 transition-colors shadow-sm">
+            Sign In
+          </button>
+
+          <p id="error-message" class="hidden text-sm text-red-400 bg-red-950/30 border border-red-900/50 rounded-lg p-3" role="alert"></p>
+        </form>
+      </div>
     </section>
 
-    <section id="session-panel" class="hidden space-y-6" data-driver="session-panel">
-      <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <p class="text-sm text-neutral-400">Signed in as</p>
-          <p id="session-username" class="text-lg font-semibold"></p>
+    <!-- ==================== AUTHENTICATED SESSION PANEL ==================== -->
+    <div id="session-panel" class="hidden flex-col gap-6">
+
+      <!-- Top Application Header -->
+      <header class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-neutral-800/80">
+        <div class="flex items-center gap-3">
+          <div class="w-9 h-9 rounded-lg bg-neutral-900 border border-neutral-700 flex items-center justify-center font-mono font-bold text-neutral-100 shadow-sm">
+            Δ
+          </div>
+          <div>
+            <div class="flex items-center gap-2">
+              <h1 class="text-lg font-semibold text-neutral-100 tracking-tight">Deltix Admin</h1>
+              <span class="text-[11px] px-2 py-0.5 rounded font-mono bg-neutral-800 border border-neutral-700 text-neutral-400" id="server-version-badge">v0.4.1</span>
+            </div>
+            <p class="text-xs text-neutral-400 flex items-center gap-1.5">
+              <span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+              Control Plane Connected
+            </p>
+          </div>
         </div>
-        <div class="flex flex-wrap gap-2">
-          <a id="users-nav-link" href="/admin/users" class="rounded-md border border-neutral-700 px-3 py-1.5 text-sm hover:bg-neutral-800 focus:outline-none focus:ring-2 focus:ring-neutral-500">User management</a>
-          <button id="logout-button" type="button" class="rounded-md border border-neutral-700 px-3 py-1.5 text-sm hover:bg-neutral-800 focus:outline-none focus:ring-2 focus:ring-neutral-500">Sign out</button>
+
+        <div class="flex items-center gap-3">
+          <div class="text-right hidden sm:block">
+            <div class="text-xs text-neutral-400">Signed in as</div>
+            <div class="text-sm font-medium text-neutral-200" id="session-username">admin</div>
+          </div>
+          <button id="logout-button" type="button"
+            class="rounded-lg border border-neutral-800 bg-neutral-900 px-3.5 py-2 text-xs font-medium text-neutral-300 hover:bg-neutral-800 hover:text-neutral-100 hover:border-neutral-700 transition">
+            Sign out
+          </button>
         </div>
+      </header>
+
+      <!-- Non-Admin Warning Banner -->
+      <div id="not-admin-notice" class="hidden rounded-xl border border-neutral-800 bg-neutral-900/60 p-4 text-sm text-neutral-300 space-y-1">
+        <div class="font-medium text-neutral-100">Standard Operator Session</div>
+        <p class="text-neutral-400 text-xs">Your account does not have global administrator privileges. You can view repositories you have roles on, but administrative features are restricted.</p>
       </div>
 
-      <div id="not-admin-notice" class="hidden rounded-lg border border-amber-900/70 bg-amber-950/30 p-4 text-sm text-amber-200">
-        Your account does not have global admin access. Only global admins can manage users, roles, and community addon trust. Contact a global admin if you need access.
-      </div>
+      <!-- Navigation Tabs Bar -->
+      <nav class="flex items-center gap-1.5 overflow-x-auto border-b border-neutral-800 pb-1 -mb-1" id="main-nav-tabs" aria-label="Sections">
+        <button type="button" data-target="tab-dashboard" class="nav-tab active px-3.5 py-2 rounded-lg text-xs font-medium text-neutral-400 hover:text-neutral-200 border border-transparent">
+          Dashboard
+        </button>
+        <button type="button" data-target="tab-repos" class="nav-tab px-3.5 py-2 rounded-lg text-xs font-medium text-neutral-400 hover:text-neutral-200 border border-transparent">
+          Repositories & Roles
+        </button>
+        <button type="button" data-target="tab-users" id="users-nav-link" class="nav-tab px-3.5 py-2 rounded-lg text-xs font-medium text-neutral-400 hover:text-neutral-200 border border-transparent">
+          User Management
+        </button>
+        <button type="button" data-target="tab-addons" class="nav-tab px-3.5 py-2 rounded-lg text-xs font-medium text-neutral-400 hover:text-neutral-200 border border-transparent">
+          Community Add-ons
+        </button>
+        <button type="button" data-target="tab-audit" class="nav-tab px-3.5 py-2 rounded-lg text-xs font-medium text-neutral-400 hover:text-neutral-200 border border-transparent">
+          Audit & Diagnostics
+        </button>
+      </nav>
 
-      <section id="roles-screen" class="space-y-4">
-        <div class="rounded-lg border border-neutral-800 bg-neutral-950/40 p-4">
-          <h2 class="text-base font-semibold">Repository roles</h2>
-          <p class="text-sm text-neutral-400">Pick a repository, then grant or revoke <code class="rounded bg-neutral-800 px-1 py-0.5">reader</code>, <code class="rounded bg-neutral-800 px-1 py-0.5">writer</code> or <code class="rounded bg-neutral-800 px-1 py-0.5">admin</code> access for a user. Repo admin only controls that one repository — it never grants access to this panel.</p>
-        </div>
+      <!-- ==================== TAB 1: DASHBOARD ==================== -->
+      <section id="tab-dashboard" class="tab-content active space-y-6">
+        <!-- Metric Cards Grid -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          
+          <div class="rounded-xl border border-neutral-800 bg-neutral-900/50 p-5 space-y-2">
+            <div class="text-xs font-medium text-neutral-400">Active Repositories</div>
+            <div class="text-2xl font-semibold text-neutral-100" id="dash-repo-count">-</div>
+            <div class="text-[11px] text-neutral-500 font-mono">Dolt commit graph</div>
+          </div>
 
-        <div class="flex flex-col gap-3 rounded-lg border border-neutral-800 bg-neutral-950/40 p-4 sm:flex-row sm:items-end">
-          <div class="flex-1">
-            <label for="roles-repo-select" class="mb-1 block text-xs font-medium text-neutral-300">Repository</label>
-            <select id="roles-repo-select" class="w-full rounded-md border border-neutral-700 bg-neutral-950 px-3 py-2 text-sm outline-none focus:border-neutral-400 focus:ring-2 focus:ring-neutral-600">
-              <option value="">Select a repository…</option>
-            </select>
+          <div class="rounded-xl border border-neutral-800 bg-neutral-900/50 p-5 space-y-2">
+            <div class="text-xs font-medium text-neutral-400">Users & Active Seats</div>
+            <div class="text-2xl font-semibold text-neutral-100 flex items-baseline gap-1.5">
+              <span id="dash-active-seats">0</span>
+              <span class="text-sm font-normal text-neutral-500">/ <span id="dash-total-users">0</span> users</span>
+            </div>
+            <div class="text-[11px] text-neutral-500">Sliding-window sessions</div>
+          </div>
+
+          <div class="rounded-xl border border-neutral-800 bg-neutral-900/50 p-5 space-y-2">
+            <div class="text-xs font-medium text-neutral-400">Trusted Add-ons</div>
+            <div class="text-2xl font-semibold text-neutral-100" id="dash-addons-count">-</div>
+            <div class="text-[11px] text-neutral-500 font-mono">TOFU trust store</div>
+          </div>
+
+          <div class="rounded-xl border border-neutral-800 bg-neutral-900/50 p-5 space-y-2">
+            <div class="text-xs font-medium text-neutral-400">gRPC Dataflow</div>
+            <div class="text-2xl font-semibold text-neutral-100 flex items-center gap-2">
+              <span class="w-2.5 h-2.5 rounded-full bg-emerald-400"></span>
+              <span class="text-base font-medium">Port 50051</span>
+            </div>
+            <div class="text-[11px] text-neutral-500 font-mono">TLS Mandatory</div>
           </div>
         </div>
 
-        <form id="role-grant-form" class="grid gap-3 rounded-lg border border-neutral-800 bg-neutral-950/40 p-4 sm:grid-cols-4">
-          <div>
-            <label for="role-grant-username" class="mb-1 block text-xs font-medium text-neutral-300">Username</label>
-            <input id="role-grant-username" name="username" type="text" required class="w-full rounded-md border border-neutral-700 bg-neutral-950 px-3 py-2 text-sm outline-none focus:border-neutral-400 focus:ring-2 focus:ring-neutral-600" />
-          </div>
-          <div>
-            <label for="role-grant-role" class="mb-1 block text-xs font-medium text-neutral-300">Role</label>
-            <select id="role-grant-role" name="role" class="w-full rounded-md border border-neutral-700 bg-neutral-950 px-3 py-2 text-sm outline-none focus:border-neutral-400 focus:ring-2 focus:ring-neutral-600">
-              <option value="reader">Reader (read-only)</option>
-              <option value="writer">Writer (read + push)</option>
-              <option value="admin">Admin (full control of this repo)</option>
-            </select>
-          </div>
-          <div class="flex items-end sm:col-span-2">
-            <button id="role-grant-button" type="submit" class="w-full rounded-md bg-neutral-100 px-3 py-2 text-sm font-medium text-neutral-900 hover:bg-white focus:outline-none focus:ring-2 focus:ring-neutral-500">Grant / update role</button>
-          </div>
-          <p id="role-message" class="hidden text-sm sm:col-span-4" role="status"></p>
-        </form>
+        <!-- Quick Actions & System Overview -->
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          
+          <!-- System Services Card -->
+          <div class="lg:col-span-2 rounded-xl border border-neutral-800 bg-neutral-900/40 p-6 space-y-4">
+            <div class="flex items-center justify-between">
+              <h2 class="text-sm font-semibold text-neutral-200">System Engine & Core Services</h2>
+              <span class="text-xs text-neutral-500">Zero MySQL Host Dependency</span>
+            </div>
 
-        <div class="overflow-x-auto rounded-lg border border-neutral-800">
-          <table class="w-full min-w-[560px] text-left text-sm">
-            <thead>
-              <tr class="border-b border-neutral-800 bg-neutral-800/60 text-neutral-300">
-                <th class="px-3 py-2 font-medium">User</th>
-                <th class="px-3 py-2 font-medium">Role</th>
-                <th class="px-3 py-2 font-medium">Granted</th>
-                <th class="px-3 py-2 font-medium">Granted by</th>
-                <th class="px-3 py-2 text-right font-medium">Actions</th>
-              </tr>
-            </thead>
-            <tbody id="roles-list">
-              <tr id="roles-empty-row">
-                <td colspan="5" class="px-3 py-4 text-center text-neutral-500">Select a repository to view its roles.</td>
-              </tr>
-            </tbody>
-          </table>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+              <div class="p-3 rounded-lg border border-neutral-800/80 bg-neutral-950/60 flex items-center justify-between">
+                <div>
+                  <div class="font-medium text-neutral-200">HTTP REST Control Plane</div>
+                  <div class="text-neutral-500">Port 9090 (HonoJS + Bun)</div>
+                </div>
+                <span class="px-2 py-0.5 rounded text-[10px] font-mono bg-neutral-800 text-neutral-300">Listening</span>
+              </div>
+
+              <div class="p-3 rounded-lg border border-neutral-800/80 bg-neutral-950/60 flex items-center justify-between">
+                <div>
+                  <div class="font-medium text-neutral-200">gRPC Transfer Engine</div>
+                  <div class="text-neutral-500">Local SSD Staging + NAS Sync</div>
+                </div>
+                <span class="px-2 py-0.5 rounded text-[10px] font-mono bg-neutral-800 text-neutral-300">Active</span>
+              </div>
+
+              <div class="p-3 rounded-lg border border-neutral-800/80 bg-neutral-950/60 flex items-center justify-between">
+                <div>
+                  <div class="font-medium text-neutral-200">License & Anti-Tamper</div>
+                  <div class="text-neutral-500">Ed25519 Air-Gapped Validation</div>
+                </div>
+                <span class="px-2 py-0.5 rounded text-[10px] font-mono bg-neutral-800 text-neutral-300">Verified</span>
+              </div>
+
+              <div class="p-3 rounded-lg border border-neutral-800/80 bg-neutral-950/60 flex items-center justify-between">
+                <div>
+                  <div class="font-medium text-neutral-200">Storage & State Stores</div>
+                  <div class="text-neutral-500">libSQL SQLite Engines</div>
+                </div>
+                <span class="px-2 py-0.5 rounded text-[10px] font-mono bg-neutral-800 text-neutral-300">Ready</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Quick Shortcuts -->
+          <div class="rounded-xl border border-neutral-800 bg-neutral-900/40 p-6 space-y-4">
+            <h2 class="text-sm font-semibold text-neutral-200">Quick Shortcuts</h2>
+            <div class="space-y-2">
+              <button type="button" data-jump="tab-repos" class="w-full text-left p-3 rounded-lg border border-neutral-800 bg-neutral-950/40 hover:bg-neutral-800/60 hover:border-neutral-700 transition flex items-center justify-between text-xs">
+                <span class="text-neutral-300 font-medium">Manage Repositories & Roles</span>
+                <span class="text-neutral-500 font-mono">→</span>
+              </button>
+              <button type="button" data-jump="tab-users" class="w-full text-left p-3 rounded-lg border border-neutral-800 bg-neutral-950/40 hover:bg-neutral-800/60 hover:border-neutral-700 transition flex items-center justify-between text-xs">
+                <span class="text-neutral-300 font-medium">Create or Modify Users</span>
+                <span class="text-neutral-500 font-mono">→</span>
+              </button>
+              <button type="button" data-jump="tab-addons" class="w-full text-left p-3 rounded-lg border border-neutral-800 bg-neutral-950/40 hover:bg-neutral-800/60 hover:border-neutral-700 transition flex items-center justify-between text-xs">
+                <span class="text-neutral-300 font-medium">Authorize Community Addon</span>
+                <span class="text-neutral-500 font-mono">→</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ==================== TAB 2: REPOSITORIES & ROLES ==================== -->
+      <section id="tab-repos" class="tab-content space-y-6">
+        
+        <!-- Repo Provisioning & Selector Panel -->
+        <section id="roles-screen" class="space-y-6">
+          
+          <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            
+            <!-- Provision New Repo Form -->
+            <div class="rounded-xl border border-neutral-800 bg-neutral-900/40 p-6 space-y-4">
+              <div>
+                <h2 class="text-sm font-semibold text-neutral-200">Provision Repository</h2>
+                <p class="text-xs text-neutral-400 mt-1">Initialize a fresh Dolt database repository with a main branch.</p>
+              </div>
+
+              <form id="repo-create-form" class="space-y-3">
+                <div>
+                  <label for="new-repo-id" class="block text-xs font-medium text-neutral-300 mb-1">Repository ID</label>
+                  <input id="new-repo-id" name="repoId" type="text" required placeholder="e.g. analytics-db"
+                    class="w-full rounded-lg border border-neutral-800 bg-neutral-950 px-3 py-2 text-xs text-neutral-100 placeholder-neutral-600 outline-none focus:border-neutral-500 focus:ring-1 focus:ring-neutral-500" />
+                </div>
+                <div>
+                  <label for="new-repo-desc" class="block text-xs font-medium text-neutral-300 mb-1">Description (Optional)</label>
+                  <input id="new-repo-desc" name="description" type="text" placeholder="Production analytics database"
+                    class="w-full rounded-lg border border-neutral-800 bg-neutral-950 px-3 py-2 text-xs text-neutral-100 placeholder-neutral-600 outline-none focus:border-neutral-500 focus:ring-1 focus:ring-neutral-500" />
+                </div>
+                <button type="submit" id="create-repo-button"
+                  class="w-full rounded-lg bg-neutral-100 px-3 py-2 text-xs font-medium text-neutral-950 hover:bg-white transition">
+                  Create Repository
+                </button>
+                <p id="repo-create-message" class="hidden text-xs" role="status"></p>
+              </form>
+            </div>
+
+            <!-- Manage Roles for Selected Repo -->
+            <div class="lg:col-span-2 rounded-xl border border-neutral-800 bg-neutral-900/40 p-6 space-y-4">
+              <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div>
+                  <h2 class="text-sm font-semibold text-neutral-200">Grant / Update Repo Role</h2>
+                  <p class="text-xs text-neutral-400 mt-0.5">Assign fine-grained access (<code class="font-mono text-neutral-300">reader</code>, <code class="font-mono text-neutral-300">writer</code>, <code class="font-mono text-neutral-300">admin</code>) to users.</p>
+                </div>
+                <div class="w-full sm:w-60">
+                  <select id="roles-repo-select" aria-label="Select a repository"
+                    class="w-full rounded-lg border border-neutral-700 bg-neutral-950 px-3 py-2 text-xs text-neutral-200 outline-none focus:border-neutral-400 focus:ring-1 focus:ring-neutral-500">
+                    <option value="">Select a repository…</option>
+                  </select>
+                </div>
+              </div>
+
+              <!-- Role Assignment Form -->
+              <form id="role-grant-form" class="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2">
+                <div>
+                  <label for="role-grant-username" class="block text-xs font-medium text-neutral-300 mb-1">Username</label>
+                  <input id="role-grant-username" name="username" type="text" required placeholder="alice"
+                    class="w-full rounded-lg border border-neutral-800 bg-neutral-950 px-3 py-2 text-xs text-neutral-100 placeholder-neutral-600 outline-none focus:border-neutral-500 focus:ring-1 focus:ring-neutral-500" />
+                </div>
+                <div>
+                  <label for="role-grant-role" class="block text-xs font-medium text-neutral-300 mb-1">Role</label>
+                  <select id="role-grant-role" name="role"
+                    class="w-full rounded-lg border border-neutral-800 bg-neutral-950 px-3 py-2 text-xs text-neutral-200 outline-none focus:border-neutral-500 focus:ring-1 focus:ring-neutral-500">
+                    <option value="reader">Reader (Read-only pull)</option>
+                    <option value="writer">Writer (Pull + Push commits)</option>
+                    <option value="admin">Admin (Branch & role control)</option>
+                  </select>
+                </div>
+                <div class="flex items-end">
+                  <button id="role-grant-button" type="submit"
+                    class="w-full rounded-lg bg-neutral-100 px-3 py-2 text-xs font-medium text-neutral-950 hover:bg-white transition">
+                    Assign Role
+                  </button>
+                </div>
+                <p id="role-message" class="hidden text-xs sm:col-span-3" role="status"></p>
+              </form>
+
+              <!-- Roles Table -->
+              <div class="overflow-x-auto rounded-lg border border-neutral-800 mt-4">
+                <table class="w-full min-w-[560px] text-left text-xs">
+                  <thead>
+                    <tr class="border-b border-neutral-800 bg-neutral-950/70 text-neutral-400 font-medium">
+                      <th class="px-3 py-2.5">User</th>
+                      <th class="px-3 py-2.5">Role</th>
+                      <th class="px-3 py-2.5">Granted At</th>
+                      <th class="px-3 py-2.5">Granted By</th>
+                      <th class="px-3 py-2.5 text-right">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody id="roles-list">
+                    <tr id="roles-empty-row">
+                      <td colspan="5" class="px-3 py-4 text-center text-neutral-500">Select a repository to inspect its roles.</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+
+          <!-- Repositories Overview Table -->
+          <div class="rounded-xl border border-neutral-800 bg-neutral-900/40 p-6 space-y-4">
+            <div class="flex items-center justify-between">
+              <div>
+                <h2 class="text-sm font-semibold text-neutral-200">Repositories Directory</h2>
+                <p class="text-xs text-neutral-400">All repositories currently registered in the Dolt storage backend.</p>
+              </div>
+            </div>
+
+            <div class="overflow-x-auto rounded-lg border border-neutral-800">
+              <table class="w-full min-w-[640px] text-left text-xs">
+                <thead>
+                  <tr class="border-b border-neutral-800 bg-neutral-950/70 text-neutral-400 font-medium">
+                    <th class="px-3 py-2.5">Repository ID</th>
+                    <th class="px-3 py-2.5">Default Branch</th>
+                    <th class="px-3 py-2.5">Description</th>
+                    <th class="px-3 py-2.5">Created At</th>
+                  </tr>
+                </thead>
+                <tbody id="repos-table-body">
+                  <tr>
+                    <td colspan="4" class="px-3 py-4 text-center text-neutral-500">Loading repositories…</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+      </section>
+
+      <!-- ==================== TAB 3: USER MANAGEMENT ==================== -->
+      <section id="tab-users" class="tab-content space-y-6">
+        <section id="users-screen" class="space-y-6">
+          
+          <!-- Top User Summary & Create Form -->
+          <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            
+            <!-- Create User Form -->
+            <div class="rounded-xl border border-neutral-800 bg-neutral-900/40 p-6 space-y-4">
+              <div>
+                <h2 class="text-sm font-semibold text-neutral-200">Create Local User</h2>
+                <p class="text-xs text-neutral-400 mt-1">Credentials stored securely with Argon2id hashing.</p>
+              </div>
+
+              <form id="user-create-form" class="space-y-3">
+                <div>
+                  <label for="new-username" class="block text-xs font-medium text-neutral-300 mb-1">Username</label>
+                  <input id="new-username" name="username" type="text" required placeholder="e.g. dev_operator"
+                    class="w-full rounded-lg border border-neutral-800 bg-neutral-950 px-3 py-2 text-xs text-neutral-100 placeholder-neutral-600 outline-none focus:border-neutral-500 focus:ring-1 focus:ring-neutral-500" />
+                </div>
+                <div>
+                  <label for="new-password" class="block text-xs font-medium text-neutral-300 mb-1">Password</label>
+                  <input id="new-password" name="password" type="password" required minlength="8" placeholder="Min. 8 characters"
+                    class="w-full rounded-lg border border-neutral-800 bg-neutral-950 px-3 py-2 text-xs text-neutral-100 placeholder-neutral-600 outline-none focus:border-neutral-500 focus:ring-1 focus:ring-neutral-500" />
+                </div>
+                <button type="submit" id="create-user-button"
+                  class="w-full rounded-lg bg-neutral-100 px-3 py-2 text-xs font-medium text-neutral-950 hover:bg-white transition">
+                  Create User Account
+                </button>
+                <p id="user-message" class="hidden text-xs" role="status"></p>
+              </form>
+            </div>
+
+            <!-- Seat Stats Banner -->
+            <div class="lg:col-span-2 rounded-xl border border-neutral-800 bg-neutral-900/40 p-6 flex flex-col justify-between">
+              <div class="space-y-2">
+                <div class="flex items-center justify-between">
+                  <h2 class="text-sm font-semibold text-neutral-200">Seat & Session Policy</h2>
+                  <div id="users-seats-indicator" class="rounded-full border border-neutral-700 px-3 py-1 text-xs text-neutral-300 font-mono">
+                    Seats in use: <span id="seats-used" class="font-bold text-neutral-100">0</span>
+                  </div>
+                </div>
+                <p class="text-xs text-neutral-400 leading-relaxed">
+                  Sessions expire via inactivity sliding windows (never absolute TTL). Access tokens renew every 15 minutes, and refresh sessions stay valid as long as regular activity or heartbeats are maintained.
+                </p>
+              </div>
+
+              <!-- Delete Confirmation Subpanel -->
+              <div id="delete-confirm-panel" class="hidden mt-4 rounded-lg border border-red-900/70 bg-red-950/30 p-4 space-y-2">
+                <p class="text-xs text-red-200">Confirm permanent deletion of user <strong id="delete-username" class="font-semibold text-white"></strong>. This cannot be undone.</p>
+                <div class="flex gap-2">
+                  <button id="confirm-delete-button" type="button" class="rounded-md bg-red-200 px-3 py-1.5 text-xs font-medium text-red-950 hover:bg-red-100 transition">Confirm Delete</button>
+                  <button id="cancel-delete-button" type="button" class="rounded-md border border-neutral-700 px-3 py-1.5 text-xs text-neutral-300 hover:bg-neutral-800 transition">Cancel</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Users Table -->
+          <div class="rounded-xl border border-neutral-800 bg-neutral-900/40 p-6 space-y-4">
+            <h2 class="text-sm font-semibold text-neutral-200">Registered Accounts</h2>
+            <div class="overflow-x-auto rounded-lg border border-neutral-800">
+              <table class="w-full min-w-[760px] text-left text-xs">
+                <thead>
+                  <tr class="border-b border-neutral-800 bg-neutral-950/70 text-neutral-400 font-medium">
+                    <th class="px-3 py-2.5">User</th>
+                    <th class="px-3 py-2.5">Status</th>
+                    <th class="px-3 py-2.5">Global Admin</th>
+                    <th class="px-3 py-2.5">Created At</th>
+                    <th class="px-3 py-2.5">Active Sessions</th>
+                    <th class="px-3 py-2.5">Last Login</th>
+                    <th class="px-3 py-2.5 text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="user-list">
+                  <tr id="user-empty-row">
+                    <td colspan="7" class="px-3 py-4 text-center text-neutral-500">No users found.</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+      </section>
+
+      <!-- ==================== TAB 4: COMMUNITY ADD-ONS ==================== -->
+      <section id="tab-addons" class="tab-content space-y-6">
+        <section id="addons-screen" class="space-y-6">
+          
+          <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <!-- Addon Trust Registration -->
+            <div class="rounded-xl border border-neutral-800 bg-neutral-900/40 p-6 space-y-4">
+              <div>
+                <h2 class="text-sm font-semibold text-neutral-200">Trust Addon Key (TOFU)</h2>
+                <p class="text-xs text-neutral-400 mt-1">Register the author's raw 32-byte Ed25519 public key (Base64) to allow loading on restart.</p>
+              </div>
+
+              <form id="trust-form" class="space-y-3">
+                <div>
+                  <label for="trust-addon-name" class="block text-xs font-medium text-neutral-300 mb-1">Addon Name</label>
+                  <input id="trust-addon-name" name="addonName" type="text" required placeholder="my-community-addon"
+                    class="w-full rounded-lg border border-neutral-800 bg-neutral-950 px-3 py-2 text-xs text-neutral-100 placeholder-neutral-600 outline-none focus:border-neutral-500 focus:ring-1 focus:ring-neutral-500" />
+                </div>
+                <div>
+                  <label for="trust-public-key" class="block text-xs font-medium text-neutral-300 mb-1">Author Public Key (Base64)</label>
+                  <textarea id="trust-public-key" name="authorPublicKey" rows="3" required placeholder="e.g. 7kF9...=="
+                    class="w-full rounded-lg border border-neutral-800 bg-neutral-950 px-3 py-2 font-mono text-xs text-neutral-100 placeholder-neutral-600 outline-none focus:border-neutral-500 focus:ring-1 focus:ring-neutral-500"></textarea>
+                </div>
+                <button type="submit"
+                  class="w-full rounded-lg bg-neutral-100 px-3 py-2 text-xs font-medium text-neutral-950 hover:bg-white transition">
+                  Trust Public Key
+                </button>
+                <p id="trust-message" class="hidden text-xs" role="status"></p>
+              </form>
+            </div>
+
+            <!-- Security & Sandbox Notice -->
+            <div class="lg:col-span-2 rounded-xl border border-neutral-800 bg-neutral-900/40 p-6 flex flex-col justify-between">
+              <div class="space-y-2">
+                <h2 class="text-sm font-semibold text-neutral-200">Add-on Security Policy</h2>
+                <p class="text-xs text-neutral-400 leading-relaxed">
+                  Deltix uses a fail-closed model for plugins and extensions. Even if an add-on is present in the filesystem, it will never be imported or executed unless its author signature matches a trusted key in this trust store.
+                </p>
+                <p class="text-xs text-neutral-500 font-mono">
+                  Trust changes take effect upon the next server process restart.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <!-- Trusted Addons Table -->
+          <div class="rounded-xl border border-neutral-800 bg-neutral-900/40 p-6 space-y-4">
+            <h2 class="text-sm font-semibold text-neutral-200">Trusted Community Add-ons</h2>
+            <div class="overflow-x-auto rounded-lg border border-neutral-800">
+              <table class="w-full min-w-[560px] text-left text-xs">
+                <thead>
+                  <tr class="border-b border-neutral-800 bg-neutral-950/70 text-neutral-400 font-medium">
+                    <th class="px-3 py-2.5">Add-on Identifier</th>
+                    <th class="px-3 py-2.5">Author Public Key</th>
+                    <th class="px-3 py-2.5">Trusted At</th>
+                    <th class="px-3 py-2.5">Trusted By</th>
+                    <th class="px-3 py-2.5 text-right">Action</th>
+                  </tr>
+                </thead>
+                <tbody id="trust-list">
+                  <tr id="trust-empty-row">
+                    <td colspan="5" class="px-3 py-4 text-center text-neutral-500">No community add-ons trusted yet.</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+      </section>
+
+      <!-- ==================== TAB 5: AUDIT & DIAGNOSTICS ==================== -->
+      <section id="tab-audit" class="tab-content space-y-6">
+        
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          
+          <!-- System Diagnostics & Support Export -->
+          <div class="rounded-xl border border-neutral-800 bg-neutral-900/40 p-6 space-y-4">
+            <div class="flex items-center justify-between">
+              <div>
+                <h2 class="text-sm font-semibold text-neutral-200">System Diagnostic Bundle</h2>
+                <p class="text-xs text-neutral-400 mt-0.5">Quick report for SysAdmins, DevOps and Support Engineers.</p>
+              </div>
+              <button id="copy-support-bundle-btn" type="button"
+                class="rounded-lg border border-neutral-700 bg-neutral-800 px-3 py-1.5 text-xs text-neutral-200 hover:bg-neutral-700 transition">
+                Copy Diagnostic JSON
+              </button>
+            </div>
+
+            <div class="p-3 rounded-lg border border-neutral-800 bg-neutral-950 font-mono text-[11px] text-neutral-400 space-y-1 overflow-x-auto">
+              <div><span class="text-neutral-600">Runtime:</span> Bun (Air-gapped)</div>
+              <div><span class="text-neutral-600">Control Plane:</span> HonoJS :9090</div>
+              <div><span class="text-neutral-600">Transfer Engine:</span> gRPC :50051 (TLS)</div>
+              <div><span class="text-neutral-600">Storage Backend:</span> Dolt commit-graph</div>
+              <div><span class="text-neutral-600">Auth Engine:</span> libSQL + Argon2id</div>
+            </div>
+          </div>
+
+          <!-- Session Audit Log -->
+          <div class="rounded-xl border border-neutral-800 bg-neutral-900/40 p-6 space-y-4">
+            <div class="flex items-center justify-between">
+              <h2 class="text-sm font-semibold text-neutral-200">Session Activity Log</h2>
+              <span class="text-[11px] text-neutral-500">Live actions</span>
+            </div>
+
+            <div id="audit-log-container" class="space-y-2 max-h-52 overflow-y-auto pr-1">
+              <div class="text-xs text-neutral-500 py-3 text-center">Session initialized. Actions will be logged here.</div>
+            </div>
+          </div>
         </div>
       </section>
 
-      <section id="users-screen" class="space-y-4">
-        <div class="flex flex-col gap-3 rounded-lg border border-neutral-800 bg-neutral-950/40 p-4 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <h2 class="text-base font-semibold">Users</h2>
-            <p class="text-sm text-neutral-400">Create, deactivate, reactivate and permanently delete local users.</p>
-          </div>
-          <div id="users-seats-indicator" class="rounded-full border border-neutral-700 px-3 py-1 text-xs text-neutral-300">Seats in use: <span id="seats-used">0</span></div>
-        </div>
+    </div>
+  </div>
 
-        <form id="user-create-form" class="grid gap-3 rounded-lg border border-neutral-800 bg-neutral-950/40 p-4 sm:grid-cols-3">
-          <div>
-            <label for="new-username" class="mb-1 block text-xs font-medium text-neutral-300">Username</label>
-            <input id="new-username" name="username" type="text" required class="w-full rounded-md border border-neutral-700 bg-neutral-950 px-3 py-2 text-sm outline-none focus:border-neutral-400 focus:ring-2 focus:ring-neutral-600" />
-          </div>
-          <div>
-            <label for="new-password" class="mb-1 block text-xs font-medium text-neutral-300">Password</label>
-            <input id="new-password" name="password" type="password" required minlength="8" class="w-full rounded-md border border-neutral-700 bg-neutral-950 px-3 py-2 text-sm outline-none focus:border-neutral-400 focus:ring-2 focus:ring-neutral-600" />
-          </div>
-          <div class="flex items-end">
-            <button id="create-user-button" type="submit" class="w-full rounded-md bg-neutral-100 px-3 py-2 text-sm font-medium text-neutral-900 hover:bg-white focus:outline-none focus:ring-2 focus:ring-neutral-500">Create user</button>
-          </div>
-          <p id="user-message" class="hidden text-sm sm:col-span-3" role="status"></p>
-        </form>
+  <!-- App Footer -->
+  <footer class="w-full max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-6 text-center text-xs text-neutral-500 border-t border-neutral-800/60 mt-8">
+    Deltix &copy; 2026 &bull; Relational Database Version Control
+  </footer>
 
-        <div class="overflow-x-auto rounded-lg border border-neutral-800">
-          <table class="w-full min-w-[820px] text-left text-sm">
-            <thead>
-              <tr class="border-b border-neutral-800 bg-neutral-800/60 text-neutral-300">
-                <th class="px-3 py-2 font-medium">User</th>
-                <th class="px-3 py-2 font-medium">Status</th>
-                <th class="px-3 py-2 font-medium">Global admin</th>
-                <th class="px-3 py-2 font-medium">Created</th>
-                <th class="px-3 py-2 font-medium">Active sessions</th>
-                <th class="px-3 py-2 font-medium">Last login</th>
-                <th class="px-3 py-2 text-right font-medium">Actions</th>
-              </tr>
-            </thead>
-            <tbody id="user-list">
-              <tr id="user-empty-row">
-                <td colspan="7" class="px-3 py-4 text-center text-neutral-500">No users created yet.</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-
-        <div id="delete-confirm-panel" class="hidden rounded-lg border border-red-900/70 bg-red-950/40 p-4">
-          <p class="text-sm text-red-200">Confirm permanent deletion for <span id="delete-username" class="font-semibold"></span>.</p>
-          <div class="mt-3 flex flex-wrap gap-2">
-            <button id="confirm-delete-button" type="button" class="rounded-md bg-red-200 px-3 py-2 text-sm font-medium text-red-950 hover:bg-red-100 focus:outline-none focus:ring-2 focus:ring-red-400">Delete user</button>
-            <button id="cancel-delete-button" type="button" class="rounded-md border border-red-300/30 px-3 py-2 text-sm text-red-100 hover:bg-red-900/40 focus:outline-none focus:ring-2 focus:ring-red-400">Cancel</button>
-          </div>
-        </div>
-      </section>
-
-      <section id="addons-screen" class="space-y-4">
-        <div>
-          <h2 class="mb-1 text-sm font-semibold">Community addon trust (TOFU)</h2>
-          <p class="text-xs text-neutral-400">Paste the author's public key exactly as printed by <code class="rounded bg-neutral-800 px-1 py-0.5">bun run scripts/generate-addon-author-keypair.ts</code>. Takes effect on the next server restart.</p>
-        </div>
-        <form id="trust-form" class="grid grid-cols-1 gap-3 sm:grid-cols-[1fr_2fr_auto] sm:items-end">
-          <div>
-            <label for="trust-addon-name" class="mb-1 block text-xs font-medium text-neutral-300">Addon name</label>
-            <input id="trust-addon-name" name="addonName" type="text" placeholder="my-community-addon" required class="w-full rounded-md border border-neutral-700 bg-neutral-950 px-3 py-2 text-sm outline-none focus:border-neutral-400 focus:ring-2 focus:ring-neutral-600" />
-          </div>
-          <div>
-            <label for="trust-public-key" class="mb-1 block text-xs font-medium text-neutral-300">Author public key (base64)</label>
-            <textarea id="trust-public-key" name="authorPublicKey" rows="1" placeholder="base64-encoded raw 32-byte Ed25519 public key" required class="w-full resize-y rounded-md border border-neutral-700 bg-neutral-950 px-3 py-2 font-mono text-xs outline-none focus:border-neutral-400 focus:ring-2 focus:ring-neutral-600"></textarea>
-          </div>
-          <button type="submit" class="h-[38px] rounded-md bg-neutral-100 px-4 text-sm font-medium text-neutral-900 hover:bg-white focus:outline-none focus:ring-2 focus:ring-neutral-500">Trust key</button>
-        </form>
-        <p id="trust-message" class="hidden text-sm" role="status"></p>
-        <div class="overflow-x-auto rounded-md border border-neutral-800">
-          <table class="w-full min-w-[480px] text-left text-xs">
-            <thead>
-              <tr class="border-b border-neutral-800 bg-neutral-800/60 text-neutral-400">
-                <th class="px-3 py-2 font-medium">Addon</th>
-                <th class="px-3 py-2 font-medium">Public key</th>
-                <th class="hidden px-3 py-2 font-medium sm:table-cell">Trusted</th>
-                <th class="hidden px-3 py-2 font-medium sm:table-cell">By</th>
-                <th class="px-3 py-2"></th>
-              </tr>
-            </thead>
-            <tbody id="trust-list">
-              <tr id="trust-empty-row">
-                <td class="px-3 py-4 text-center text-neutral-500" colspan="5">No community addons trusted yet.</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </section>
-    </section>
-  </main>
   <script src="/admin/vendor/driver.iife.js"></script>
   <script src="/admin/app.js"></script>
 </body>
