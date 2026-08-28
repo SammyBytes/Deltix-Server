@@ -9,6 +9,30 @@ Each entry starts with a **plain-language summary** (what changed, in
 everyday words) before any technical detail — written so someone outside
 engineering can understand what shipped and why it matters.
 
+## [0.5.3] - 2026-08-28
+
+**In plain terms:** Windows now has the same one-command install experience
+Linux already had. Previously, installing on Windows Server meant manually
+downloading or cloning the source and running `install-windows.ps1`
+yourself — there was no equivalent of the Linux one-liner. `INSTALL.md` also
+now says clearly that Deltix-Server does not auto-detect your operating
+system: Linux and Windows each have their own installer and their own
+one-line bootstrap, and every release ships the exact same source tarball
+for both (Bun runs the same code on both platforms; only the small
+standalone `generate-server-tls-cert` helper is currently compiled and
+published as a binary for Linux only).
+
+- **Added:** `scripts/get-deltix.ps1` — a one-line bootstrap installer for
+  Windows, mirroring `scripts/get-deltix.sh`. Resolves the latest release
+  (or a pinned `$env:DELTIX_VERSION`), downloads the source tarball, and
+  runs `scripts\install-windows.ps1` automatically:
+  `iwr -useb .../get-deltix.ps1 | iex`.
+- **Documented:** `INSTALL.md` now states explicitly that platform
+  selection is manual (no auto-detect) and that CD does not build or
+  publish separate Windows binaries for the server itself — only the
+  optional TLS certificate tool is currently Linux-only as a compiled
+  binary.
+
 ## [0.5.2] - 2026-08-28
 
 **In plain terms:** the previous installer (`install.sh` / `get-deltix.sh`)
