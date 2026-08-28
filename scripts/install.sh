@@ -312,8 +312,32 @@ fi
 
 # Install dependencies if node_modules missing
 if [ ! -d "${INSTALL_DIR}/node_modules" ]; then
+  # A small number of transitive dependencies (e.g. protobufjs, pulled in by
+  # @grpc/proto-loader) run a `postinstall` script that shells out to a
+  # literal `node` binary, not `bun`. On a machine where only Bun was ever
+  # installed (the whole point of this installer), `node` does not exist and
+  # `bun install` fails with "node: command not found" / "exited with 127".
+  # Bun is a drop-in `node` replacement for this purpose, so if there is no
+  # real Node.js already on PATH, point a throwaway `node` shim at Bun just
+  # for the duration of this install -- it is not left behind afterward.
+  NODE_SHIM=""
+  if ! command -v node >/dev/null 2>&1; then
+    NODE_SHIM="$(mktemp -d)/node"
+    ln -s "${BUN_BIN}" "${NODE_SHIM}"
+    log_info "No system Node.js found; using Bun as a temporary 'node' shim for postinstall scripts (e.g. protobufjs)."
+  fi
+
   log_info "Installing production dependencies with Bun..."
-  (cd "${INSTALL_DIR}" && "${BUN_BIN}" install --production)
+  (
+    if [ -n "${NODE_SHIM}" ]; then
+      export PATH="$(dirname "${NODE_SHIM}"):${PATH}"
+    fi
+    cd "${INSTALL_DIR}" && "${BUN_BIN}" install --production
+  )
+
+  if [ -n "${NODE_SHIM}" ]; then
+    rm -rf "$(dirname "${NODE_SHIM}")"
+  fi
 fi
 
 chown -R "${SERVICE_USER}:${SERVICE_GROUP}" "${INSTALL_DIR}"

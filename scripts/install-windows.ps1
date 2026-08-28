@@ -263,12 +263,39 @@ if (Test-Path "$scriptDir\src") {
 
 # Install dependencies if node_modules missing
 if (-not (Test-Path "$InstallDir\node_modules")) {
+    # Some transitive dependencies (e.g. protobufjs, pulled in by
+    # @grpc/proto-loader) run a "postinstall" script that shells out to a
+    # literal "node" executable, not "bun". On a machine where only Bun was
+    # ever installed (the whole point of this installer), node.exe does not
+    # exist and "bun install" fails. Bun is a drop-in node replacement for
+    # this purpose, so if no real Node.js is on PATH, point a throwaway
+    # node.exe shim at Bun for the duration of this install only.
+    $nodeShimDir = $null
+    $existingNode = Get-Command node.exe -ErrorAction SilentlyContinue
+    if (-not $existingNode) {
+        $nodeShimDir = Join-Path $env:TEMP ("deltix-node-shim-" + [Guid]::NewGuid().ToString("N"))
+        New-Item -ItemType Directory -Path $nodeShimDir -Force | Out-Null
+        Copy-Item -Path $BunPath -Destination (Join-Path $nodeShimDir "node.exe") -Force
+        Log-Info "No system Node.js found; using Bun as a temporary 'node' shim for postinstall scripts (e.g. protobufjs)."
+    }
+
     Log-Info "Installing production dependencies with Bun..."
-    Push-Location $InstallDir
+    $originalPath = $env:Path
     try {
-        & $BunPath install --production
+        if ($nodeShimDir) {
+            $env:Path = "$nodeShimDir;$env:Path"
+        }
+        Push-Location $InstallDir
+        try {
+            & $BunPath install --production
+        } finally {
+            Pop-Location
+        }
     } finally {
-        Pop-Location
+        $env:Path = $originalPath
+        if ($nodeShimDir) {
+            Remove-Item -Path $nodeShimDir -Recurse -Force -ErrorAction SilentlyContinue
+        }
     }
 }
 

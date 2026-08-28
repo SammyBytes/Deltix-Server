@@ -9,6 +9,31 @@ Each entry starts with a **plain-language summary** (what changed, in
 everyday words) before any technical detail — written so someone outside
 engineering can understand what shipped and why it matters.
 
+## [0.5.4] - 2026-08-28
+
+**In plain terms:** on a machine that only ever had Bun installed (which is
+the entire point of this installer — no Node.js requirement), `bun install`
+could fail with `node: command not found` and abort the install. The cause:
+a few transitive dependencies (`protobufjs`, pulled in by
+`@grpc/proto-loader`) run a `postinstall` script that shells out to a
+literal `node` executable rather than `bun`. This was previously only
+reported and worked around manually by a user (`sudo ln -s
+/usr/local/bin/bun /usr/local/bin/node`) — the installer now does this
+itself, automatically and temporarily, only for the duration of the
+dependency install, and only if no real Node.js is already present.
+
+- **Fixed:** `scripts/install.sh` and `scripts/install-windows.ps1` both
+  detect whether `node` (or `node.exe`) is already on `PATH` before running
+  `bun install --production`. If it is not, a throwaway shim pointing at
+  the already-installed Bun binary is added to `PATH` for that one command
+  only, then removed — it is never left on the system, and it is never
+  used if a real Node.js installation already exists.
+- **Verified:** re-ran the full install end to end inside a disposable,
+  Node-less systemd container (the exact failure mode reported): dependency
+  install now succeeds, `protobufjs`'s postinstall script runs cleanly
+  against the Bun shim, and the resulting service starts and responds with
+  HTTP 200 on `/admin`.
+
 ## [0.5.3] - 2026-08-28
 
 **In plain terms:** Windows now has the same one-command install experience
