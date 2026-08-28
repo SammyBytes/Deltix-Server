@@ -28,7 +28,6 @@ import {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
 function formatBytes(bytes: number): string {
   if (bytes <= 0) return '0 B';
   const units = ['B', 'KB', 'MB', 'GB', 'TB'];
@@ -365,6 +364,7 @@ export interface DoctorCheckResult {
   name: string;
   status: CheckStatus;
   message: string;
+  note?: string;
   diagnostic?: DiagnosticReport;
 }
 
@@ -377,8 +377,30 @@ export interface DoctorSuiteResult {
 }
 
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: intentionally a flat, linear sequence of independent try/catch diagnostic checks (runtime, OS, disk, SQLite, crypto keys, network ports, ...); each check is already isolated in its own try/catch and shares no state with the others, so splitting further would add indirection without reducing risk.
+/**
+ * Returns true when the deltix systemd service is currently active (running).
+ * The doctor uses this to distinguish a genuinely free port from one already
+ * owned by the running Deltix service itself — in a healthy production box the
+ * control-plane and gRPC ports are (correctly) occupied by deltix.service, so
+ * "port in use" is expected, not a failure. Best-effort: any error (no
+ * systemd, missing privileges, unsupported platform) resolves to false so the
+ * check falls back to the strict "in use" report.
+ */
+function isDeltixServiceActive(): boolean {
+  try {
+    return (
+      process.platform === 'linux' &&
+      existsSync('/run/systemd/system') &&
+      Bun.spawnSync(['systemctl', 'is-active', '--quiet', 'deltix.service']).exitCode === 0
+    );
+  } catch {
+    return false;
+  }
+}
+
 export async function runDoctorSuite(configPath?: string): Promise<DoctorSuiteResult> {
   const checks: DoctorCheckResult[] = [];
+  const serviceActive = isDeltixServiceActive();
 
   // Check 1: Bun Runtime & Version
   try {
@@ -600,6 +622,14 @@ export async function runDoctorSuite(configPath?: string): Promise<DoctorSuiteRe
         status: 'WARN',
         message: `Port ${config.server.port} is in use (dynamicPort is enabled)`,
       });
+    } else if (serviceActive) {
+      checks.push({
+        id: 'network-http-port',
+        name: 'HTTP Port Availability',
+        status: 'PASS',
+        message: `Port ${config.server.port} is held by the running deltix.service (expected)`,
+        note: `deltix.service is active and listens on ${config.server.port} — this is the healthy production state, not a conflict.`,
+      });
     } else {
       checks.push({
         id: 'network-http-port',
@@ -633,6 +663,14 @@ export async function runDoctorSuite(configPath?: string): Promise<DoctorSuiteRe
         name: 'gRPC Port Availability',
         status: 'PASS',
         message: `Port ${config.server.grpcPort} is available on ${config.server.host}`,
+      });
+    } else if (serviceActive) {
+      checks.push({
+        id: 'network-grpc-port',
+        name: 'gRPC Port Availability',
+        status: 'PASS',
+        message: `Port ${config.server.grpcPort} is held by the running deltix.service (expected)`,
+        note: `deltix.service is active and listens on ${config.server.grpcPort} — this is the healthy production state, not a conflict.`,
       });
     } else {
       checks.push({
@@ -754,6 +792,10 @@ export async function commandDoctor(args: {
     const tag = check.status === 'PASS' ? '[PASS]' : check.status === 'WARN' ? '[WARN]' : '[FAIL]';
 
     console.log(`${tag.padEnd(8)} ${check.name}: ${check.message}`);
+
+    if (check.note) {
+      console.log(`         ${check.note}`);
+    }
 
     if (check.diagnostic) {
       console.log('');

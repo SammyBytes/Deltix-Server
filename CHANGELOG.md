@@ -9,6 +9,31 @@ Each entry starts with a **plain-language summary** (what changed, in
 everyday words) before any technical detail — written so someone outside
 engineering can understand what shipped and why it matters.
 
+## [0.6.6] - 2026-08-28
+
+**In plain terms:** the server's health-check command kept reporting the HTTP
+and gRPC ports as "FAILED — already in use" on a healthy production machine.
+That was misleading: in a normal running system those ports are *supposed* to
+be occupied — by the Deltix server itself. The doctor now recognizes that the
+running `deltix.service` owns those ports and reports them as passed, with a
+note explaining the port is held by the service (the healthy production
+state). Only a genuinely foreign process holding the port is now flagged.
+
+### Fixed
+
+- **Doctor reported the service's own ports as failures**: `runDoctorSuite`
+  treated any occupied port as a conflict. It now checks whether
+  `deltix.service` is active (Linux, systemd) and, when the port is held by
+  the running Deltix service, reports `PASS` with an explanatory note instead
+  of a `FAIL` with `ERR_HTTP_PORT_IN_USE` / `ERR_GRPC_PORT_IN_USE`. The strict
+  failure path still triggers if a foreign process is listening while Deltix
+  is not running.
+
+### Tests
+
+- Manual: `doctor` in dev still reports 9 passed / 0 failures with free
+  ports; lint 0 errors, unit 259 pass / 0 fail.
+
 ## [0.6.5] - 2026-08-28
 
 **In plain terms:** this patch makes the server's diagnostic commands tell the
