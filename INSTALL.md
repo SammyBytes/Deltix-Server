@@ -41,8 +41,29 @@ administrator account through the Admin Web UI on first visit.
 
 ### Steps
 
-Download or clone the Deltix-Server release, then from the repository
-root:
+The GitHub Release for a given tag only carries standalone tool binaries
+(such as the TLS certificate generator), not a packaged server tarball.
+To install a specific version, fetch the tagged **source** instead, using
+either of these two options:
+
+**Option A — clone with git (recommended):**
+
+```bash
+git clone --branch v0.5.0 --depth 1 https://github.com/SammyBytes/Deltix-Server.git
+cd Deltix-Server
+```
+
+**Option B — download the tagged source archive (no git required):**
+
+```bash
+curl -L -o deltix-server-v0.5.0.tar.gz \
+  https://github.com/SammyBytes/Deltix-Server/archive/refs/tags/v0.5.0.tar.gz
+tar xzf deltix-server-v0.5.0.tar.gz
+cd Deltix-Server-0.5.0
+```
+
+Replace `v0.5.0` with the release you want to install. Then, from the
+repository root:
 
 ```bash
 sudo ./scripts/install.sh
