@@ -9,7 +9,7 @@ Each entry starts with a **plain-language summary** (what changed, in
 everyday words) before any technical detail — written so someone outside
 engineering can understand what shipped and why it matters.
 
-## [Unreleased]
+## [0.6.0] - 2026-08-28
 
 **In plain terms:** Deltix-Client can now confirm it is talking to the right
 server without anyone having to manually copy or paste certificate files over
