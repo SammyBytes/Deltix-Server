@@ -287,21 +287,40 @@ function showSession(username, isGlobalAdmin) {
     applyGlobalAdminGating();
   });
   logAuditEvent('Session authenticated', { username: username, isGlobalAdmin: currentIsGlobalAdmin });
-  
+
   // Hash navigation check
   const hash = window.location.hash.replace('#', '');
   if (hash && document.getElementById('tab-' + hash)) {
     switchTab('tab-' + hash);
   }
 
-  maybeRunDashboardTour();
+  // Load data FIRST. Any exception in the (cosmetic, non-essential) tour or
+  // audit code below must never abort the initial data population, otherwise
+  // a fully healthy admin logs in to empty tables until the next write
+  // triggers a re-fetch. Data loading is the critical path here.
+  if (currentIsGlobalAdmin) {
+    void loadUsers();
+    void loadTrustedAddons();
+    void loadReposAndDirectory();
+  }
 
-  if (!currentIsGlobalAdmin) return;
-  void loadUsers();
-  void loadTrustedAddons();
-  void loadReposAndDirectory();
-  maybeRunAddonsTour();
-  maybeRunUsersTour();
+  runNonCritical(() => maybeRunDashboardTour());
+  runNonCritical(() => {
+    if (currentIsGlobalAdmin) {
+      maybeRunAddonsTour();
+      maybeRunUsersTour();
+    }
+  });
+}
+
+// Wraps cosmetic/side-effect work (onboarding tours, etc.) so a runtime error
+// there can never break the sessions flow or the data load that follows.
+function runNonCritical(task) {
+  try {
+    task();
+  } catch (err) {
+    console.error('Non-critical UI step failed:', err);
+  }
 }
 
 function showForm() {

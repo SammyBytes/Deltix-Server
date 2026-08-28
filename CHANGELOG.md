@@ -9,6 +9,35 @@ Each entry starts with a **plain-language summary** (what changed, in
 everyday words) before any technical detail — written so someone outside
 engineering can understand what shipped and why it matters.
 
+## [0.6.8] - 2026-08-28
+
+**In plain terms:** a serious bug could leave the Admin Web UI showing empty
+tables right after you logged in — the user list, repositories, and add-ons
+all looked blank — even though the data was safely stored. The data did not
+actually disappear: it only reappeared after you performed an action (like
+registering a user or repo). This release fixes that so the dashboard always
+loads your existing data on login.
+
+### Fixed
+
+- **Dashboard tabs stayed empty after login until the next write**: in
+  `showSession()` the initial data load (`loadUsers`, `loadTrustedAddons`,
+  `loadReposAndDirectory`) ran *after* a call to start the dashboard
+  onboarding tour (`maybeRunDashboardTour`). If the tour library (`driver.js`)
+  threw for any reason, the exception aborted the rest of the function and the
+  initial data load never happened — so a healthy admin was shown empty tables
+  until a later write action re-triggered a fetch. Data loading now runs
+  first, and every non-essential (tour) step is wrapped in `runNonCritical()`
+  so a cosmetic failure can never block the critical data loads.
+
+### Tests
+
+- Added a reproduction harness that loads the real `app.js` with a
+  `driver.js` tour that throws on login: pre-fix it shows `/auth/users` is
+  never requested (FAIL); post-fix `/auth/users` fires (PASS) even when the
+  tour errors. Verified with Bun locally; lint 0 errors; unit 259 pass / 0
+  fail; smoke 34 pass / 0 fail.
+
 ## [0.6.7] - 2026-08-28
 
 **In plain terms:** the Admin Web UI page now asks the browser for its own
