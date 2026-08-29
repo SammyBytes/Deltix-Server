@@ -4,68 +4,122 @@
 [![CD](https://github.com/SammyBytes/Deltix-Server/actions/workflows/cd.yml/badge.svg)](https://github.com/SammyBytes/Deltix-Server/actions/workflows/cd.yml)
 [![License: BSL 1.1](https://img.shields.io/badge/license-BSL%201.1-blue.svg)](./LICENSE)
 
-Enterprise control plane for **Deltix** — Git-style version control for relational database
-schemas and data (branch, merge, and pull-request your database before it hits production).
-Built with [Bun](https://bun.sh) + [HonoJS](https://hono.dev), backed by [Dolt](https://www.dolthub.com/)
-as the immutable, versioned storage engine.
+The enterprise **control plane** for [Deltix](https://github.com/SammyBytes/Deltix-Client) —
+Git-style version control for relational databases. Built with [Bun](https://bun.sh) +
+[Hono](https://hono.dev), backed by [Dolt](https://www.dolthub.com/) as the immutable,
+versioned storage engine.
 
-> Licensed under the **Business Source License 1.1** (source-available). See [`LICENSE`](./LICENSE).
-> Production use is free for up to 3 concurrent active seats; larger deployments or use of
-> Enterprise Add-ons require a commercial license. Converts to Apache-2.0 on 2030-01-01.
+> **Business Source License 1.1** (source-available). Free for up to 3 concurrent active
+> seats; larger deployments or Enterprise add-ons need a commercial license. Converts to
+> Apache-2.0 on 2030-01-01. See [`LICENSE`](./LICENSE).
 
-## What this is
+---
 
-Deltix-Server is the control plane that:
-- Validates the Ed25519-signed license key at boot and periodically thereafter, gating features
-  (seat count, tier, addon entitlements) strictly server-side.
-- Enforces anti-tamper protection against operating-system clock manipulation, backed by
-  Dolt's own immutable commit graph (`dolt_log`) — never by data this process can edit itself.
-- Exposes a REST API (HonoJS) for authentication, session management, and repository operations,
-  plus an optional Admin Web UI for TOFU addon trust management.
-- Dynamically loads Community and Enterprise Add-ons — signature-verified (Ed25519, Trust-On-First-Use
-  for community authors), manifest-validated against a closed capability list, and sandboxed behind
-  a circuit breaker — only when the active license explicitly authorizes them.
-- Brokers gRPC (mTLS) data transfers into a local SSD staging area before asynchronously syncing to NAS.
+## What it does
 
-## What this is NOT
+- **Versioning API** — per-repo Dolt repositories with real commits, branches, merges,
+  log/diff, and commit-based **push/pull** (the client sends/receives structured commits,
+  not loose files).
+- **Authentication & access control** — Argon2id local users, Ed25519 JWT sessions, and
+  per-repo roles (`reader`/`writer`/`admin`). Repo creation is gated by a `canCreateRepos`
+  permission (global admins always pass).
+- **Licensing** — validates the Ed25519-signed license at boot and periodically, gating
+  seats/tier/add-ons server-side, with anti-tamper backed by Dolt's own `dolt_log`.
+- **Add-ons** — dynamically loads signature-verified (Ed25519/TOFU), manifest-validated
+  Community/Enterprise add-ons behind a per-add-on circuit breaker.
+- **Admin Web UI** — same-origin, CSP-locked panel for user management and add-on trust.
+- **Transfer engine** — mTLS gRPC for streaming pulls and staging→NAS sync.
 
-- It does **not** vendor, clone, or recompile Dolt's Go source. Dolt is consumed strictly as a
-  precompiled black-box binary, invoked via its CLI.
-- It does **not** write directly to NAS storage — every transfer passes through local SSD staging.
-- It does **not** require internet access to validate licenses (fully air-gapped capable).
-- It does **not** expose or load an Add-on into memory unless the license explicitly grants it,
-  its manifest only requests capabilities from the closed permission list, and (for community
-  addons) its author key is explicitly trusted by an admin.
+It consumes Dolt strictly as a black-box binary (never vendored or recompiled), never writes
+NAS directly (everything goes through local SSD staging), and validates licenses fully
+air-gapped.
+
+---
+
+## Run it
+
+The supported production path is the installer or Docker. Full step-by-step (including
+generating real license/JWT material and TLS) is in
+[`docs/INSTALL-GUIDE.md`](./docs/INSTALL-GUIDE.md) and [`docs/pilot-plan.md`](./docs/pilot-plan.md).
+
+```bash
+# Docker (image built by cd.yml on every tag):
+docker pull ghcr.io/sammybytes/deltix-server:latest
+docker run -p 9090:9090 -p 50051:50051 \
+  -v deltix-data:/app/data ghcr.io/sammybytes/deltix-server:latest
+```
+
+The container exposes `9090` (HTTP control plane) and `50051` (gRPC transfer). Persistent
+state to back up: `/app/data` plus your mounted Dolt repository path.
+
+### TLS
+
+By default the HTTP plane serves plain HTTP (fine behind a TLS-terminating proxy). To serve
+HTTPS directly on a bare VM/IP, generate a self-signed cert and set
+`DELTIX_HTTP_TLS_CERT_PATH` + `DELTIX_HTTP_TLS_KEY_PATH`. The generator ships as a standalone
+binary in each release (`deltix-gen-cert-linux-x64`) and as `bun run tls:server-cert` from a
+checkout — see the install guide. When the server is reached by IP, the cert auto-names itself
+with the machine hostname so clients verify without disabling TLS.
+
+---
+
+## API surface
+
+All endpoints are under `/api/v1` and require a `Bearer` token except `/auth/login`,
+`/auth/refresh`, `/auth/setup*` and `/status`.
+
+| Area | Endpoints |
+|---|---|
+| Auth | `POST /auth/login` · `/auth/refresh` · `/auth/logout` · `GET /auth/users` · role/permission toggles |
+| Repos | `POST /versioning/repos` · `GET /versioning/repos[/:repoId]` |
+| Branches | `GET/POST/DELETE /versioning/repos/:repoId/branches[/:name]` |
+| History | `GET /versioning/repos/:repoId/log` · `/diff` |
+| Sync | `GET/PUT/POST /versioning/repos/:repoId/sync-preferences[/dry-run]` |
+| Push (commits) | `POST /versioning/repos/:repoId/push-commits` |
+| Pull (commits) | `GET /versioning/repos/:repoId/refs` · `GET /versioning/repos/:repoId/pull-commits` (NDJSON) |
+| Roles | `GET/POST/DELETE /versioning/repos/:repoId/roles[/:username]` |
+| Transfer | `POST /push/ticket` (gRPC push/pull authorization) |
+
+The matching client commands live in
+[the Deltix-Client README](https://github.com/SammyBytes/Deltix-Client#commands).
+
+---
 
 ## Architecture
 
-Modular monolith organized by **bounded contexts** under `src/contexts/*`. There is no clean/hexagonal
-layering — see [`.github/copilot-instructions.md`](./.github/copilot-instructions.md) for the full
-set of engineering rules (architecture, security, licensing, testing, logging) that govern this repo.
+A modular monolith organized by **bounded contexts** under `src/contexts/*` (no hexagonal
+layering). External processes are shelled out only through argv arrays (no shell strings);
+Dolt is always a verified black-box binary. Full rules:
+[`.github/copilot-instructions.md`](./.github/copilot-instructions.md).
 
-Contexts (all implemented through Fase 4):
-- `licensing`: Ed25519 signature verification + Dolt-log-backed anti-tamper.
-- `auth`: local users, Argon2id password hashing, JWT (Ed25519) session issuance.
-- `transfer`: ephemeral transfer tickets, gRPC Push/Pull/Heartbeat, SSD→NAS staging sync.
-- `addons`: `@deltix/addon-sdk` (MIT, `packages/addon-sdk`) contracts, TOFU trust store, fail-closed
-  dynamic loader, per-addon circuit breaker.
-- `admin-ui`: static Admin Web UI (login + addon trust panel), served same-origin, CSP-locked.
+| Context | Responsibility |
+|---|---|
+| `licensing` | Ed25519 signature verification + Dolt-log-backed anti-tamper. |
+| `auth` | Local users, Argon2id hashing, JWT sessions, per-repo roles, `canCreateRepos`. |
+| `versioning` | Repo provisioning, commits, branches, merge, log/diff, sync-prefs, push/pull-commits. |
+| `transfer`, `storage` | Ephemeral tickets, gRPC Push/Pull/Heartbeat, SSD→NAS staging. |
+| `addons` | Addon SDK contracts, TOFU trust store, fail-closed loader, circuit breaker. |
+| `admin-ui` | Static Admin Web UI (login, users, add-on trust), CSP-locked. |
+| `tls-discovery` | Certificate bootstrap so clients can trust a self-signed server. |
+
+---
 
 ## Roadmap
 
-1. ✅ Cryptography & Licensing (Ed25519 + Anti-Tamper)
-2. ✅ REST Control Plane & Authentication (HonoJS)
-3. ✅ Ephemeral Tickets (2m TTL) & gRPC Engine (:50051, mTLS)
-4. ✅ Dynamic Add-on Loading (TOFU trust, closed capability list, circuit breaker)
-5. ✅ Real Dolt Versioning, Admin User Management & Sync Preferences — complete,
-   see [`docs/decisions/0002-phase-5-versioning-and-user-management.md`](./docs/decisions/0002-phase-5-versioning-and-user-management.md).
-   Sub-phases: 5.1 ✅ per-repo Dolt provisioning, 5.2 ✅ real commits on push, 5.3 ✅ branching,
-   5.4 ✅ merge/conflicts, 5.5 ✅ log/diff, 5.6 ✅ per-repo authorization (`reader`/`writer`/`admin` via auth-owned ACL), 5.7 ✅ Admin Web UI
-   user management (libSQL-backed users, guided first-boot admin setup, create/deactivate/delete, active-session/seat analytics), 5.8 ✅ sync preferences (per-repo persistence, schema-only vs schema+data, selective
-   table sync with server-side FK-closure validation and dry-run preview).
+1. ✅ Cryptography & licensing (Ed25519 + anti-tamper)
+2. ✅ REST control plane & authentication
+3. ✅ Ephemeral tickets (2m TTL) & gRPC engine (mTLS)
+4. ✅ Dynamic add-on loading (TOFU, closed capability list, circuit breaker)
+5. ✅ Real Dolt versioning, user management & sync preferences — see
+   [`docs/decisions/0002-phase-5-versioning-and-user-management.md`](./docs/decisions/0002-phase-5-versioning-and-user-management.md)
+   (5.1 provisioning · 5.2 commits · 5.3 branching · 5.4 merge/conflicts · 5.5 log/diff ·
+   5.6 per-repo ACL · 5.7 admin UI · 5.8 sync-prefs + FK closure · 5.9 commit-based
+   push/pull + `canCreateRepos` + auto-create-on-first-push)
 
-Branching model: **trunk-based**, one branch per roadmap phase, merged into `main` once its
-test suite (unit + integration + smoke) is green.
+Branching model: **trunk-based**, one branch per phase, merged to `main` once unit +
+integration + smoke are green.
+
+---
 
 ## Development
 
@@ -73,93 +127,23 @@ Requires [Bun](https://bun.sh) `>=1.4`.
 
 ```bash
 bun install
-cp .env.example .env   # fill in every DELTIX_* var — see .env.example for the full list
+cp .env.example .env      # fill in DELTIX_* vars (see .env.example)
 
-bun run lint            # Biome
-bun test                 # all tiers
-bun run test:unit        # fast, no external process/binaries
-bun run test:integration # spins up a real temporary Dolt repository
-bun run test:smoke       # boots the module end-to-end, asserts process behavior
-bun audit                 # dependency vulnerability scan (also runs in CI)
+bun run lint              # Biome
+bun run test:unit         # fast, no external processes
+bun run test:integration  # spins up a real temporary Dolt repository
+bun run test:smoke        # boots the module end-to-end
+bun audit                 # dependency scan (also in CI)
 ```
 
-Local demo (throwaway test fixtures — **never use in production/pilot**):
-```bash
-bun run scripts/setup-local-demo.ts
-bun run dev
-```
-
-## Deployment (Docker)
-
-A production-oriented multi-stage `Dockerfile` is included (Bun runtime + a real Dolt CLI
-installed in the image — required at runtime, not vendored). See [`docs/pilot-plan.md`](./docs/pilot-plan.md)
-for the full step-by-step guide to running a controlled pilot deployment, including how to
-generate real (non-test-fixture) license and JWT material.
+Local demo with throwaway fixtures (**never** for production):
 
 ```bash
-docker build -t deltix-server .
-# or pull a published image (built by .github/workflows/cd.yml on tag push):
-docker pull ghcr.io/sammybytes/deltix-server:latest
+bun run scripts/setup-local-demo.ts && bun run dev
 ```
-
-The image exposes port `9090` (HTTP control plane) and `50051` (gRPC transfer engine, mTLS),
-and declares `/app/data` + your mounted Dolt repo path as the persistent state to back up.
-
-### HTTPS for the HTTP control plane (Admin Web UI + REST API)
-
-By default the HTTP control plane (port `9090`) serves plain HTTP, which is fine when a
-reverse proxy in front of it terminates TLS. If you're deploying directly onto a bare
-VM/IP with no reverse proxy (the common case for an internal/air-gapped pilot), generate a
-self-signed certificate and point the server at it. Pick whichever of these three matches
-how you deploy — no need to have the source repo checked out on the target machine:
-
-**Option A — standalone binary (recommended for a bare VM with no repo/Bun toolchain
-installed):** download `deltix-gen-cert-linux-x64` (or `-arm64`) from the
-[latest release](https://github.com/SammyBytes/Deltix-Server/releases/latest), then:
-
-```bash
-chmod +x deltix-gen-cert-linux-x64
-./deltix-gen-cert-linux-x64 10.1.10.129   # replace with your server's hostname or IP
-```
-
-**Option B — Docker (if you're already running the server via the published image):**
-
-```bash
-mkdir -p ./certs && chmod 777 ./certs
-docker run --rm --entrypoint bun -v "$(pwd)/certs:/app/certs" \
-  ghcr.io/sammybytes/deltix-server:latest \
-  run scripts/generate-server-tls-cert.ts 10.1.10.129 /app/certs
-```
-
-**Option C — from a repo checkout (if you already have the source and `bun install`'d):**
-
-```bash
-bun run tls:server-cert 10.1.10.129   # replace with your server's hostname or IP
-```
-
-All three write `server.crt` + `server.key` to the given output directory and print the two
-env vars to add:
-
-```
-DELTIX_HTTP_TLS_CERT_PATH=/path/to/certs/server.crt
-DELTIX_HTTP_TLS_KEY_PATH=/path/to/certs/server.key
-```
-
-Once both are set, the server automatically serves the Admin Web UI and REST API over HTTPS
-and marks session cookies `Secure`. Without either of these set, the server stays on plain
-HTTP and cookies are only marked `Secure` when a reverse proxy in front of it sets
-`x-forwarded-proto: https`. Browsers/CLI will warn about an untrusted issuer for a
-self-signed cert on first connection — expected, and safe to accept, since the connection
-itself is still fully encrypted; it's only not signed by a public CA.
 
 ## Security
 
-See [`SECURITY.md`](./SECURITY.md) for the supported version policy, vulnerability reporting
-process (private, via GitHub Security Advisories), and this project's security baseline
-(OWASP Top 10 / ASVS, fail-closed licensing and addon loading, no hardcoded secrets, automated
-dependency scanning via Dependabot + `bun audit` in CI).
-
-## Testing philosophy
-
-TDD is mandatory: write the failing test first, then the minimal implementation, then refactor.
-No phase branch merges into `main` without unit, integration, and smoke tests passing.
+See [`SECURITY.md`](./SECURITY.md) for the supported-version policy, private vulnerability
+reporting (GitHub Security Advisories), and the security baseline (OWASP Top 10 / ASVS,
+fail-closed licensing and add-on loading, no hardcoded secrets, Dependabot + `bun audit` in CI).
