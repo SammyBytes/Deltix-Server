@@ -512,13 +512,38 @@ fi
 # happens the server would otherwise fail to boot with
 # 'ENOENT .../certs/grpc/server.crt'. Regenerating it only when absent keeps
 # upgrades from churning a valid cert while recovering from a deleted one.
+#
+# In self-signed mode the gRPC engine reuses the *same* certificate as the
+# HTTP control plane. The CLI trusts a single cert (fetched from the gRPC
+# port) and validates the HTTP control plane with that same CA (see
+# http-tls.ts), so both ports must present the identical certificate -- if
+# they differ, `deltix login` fails with "self signed certificate". Existing
+# installs that generated two separate certs are healed here too: whenever the
+# gRPC cert is missing or differs from the HTTP cert, it is resynced to match.
 GRPC_TLS_HOSTNAME="${GRPC_TLS_HOSTNAME:-${TLS_HOSTNAME:-$(hostname -f 2>/dev/null || hostname)}}"
+GRPC_CERTS_NEED_REGEN=false
 if [ ! -f "${GRPC_CERTS_DIR}/server.crt" ] || [ ! -f "${GRPC_CERTS_DIR}/server.key" ]; then
-  log_info "Generating the mandatory gRPC transfer engine TLS certificate..."
-  if is_ip "${GRPC_TLS_HOSTNAME}"; then
-    (cd "${INSTALL_DIR}" && "${BUN_BIN}" run scripts/generate-server-tls-cert.ts "${GRPC_TLS_HOSTNAME}" "${TLS_SERVER_NAME_OVERRIDE}" "${GRPC_CERTS_DIR}")
+  GRPC_CERTS_NEED_REGEN=true
+fi
+if [ "${TLS_MODE}" = "self-signed" ] \
+  && [ -f "${RESOLVED_TLS_CERT_PATH}" ] && [ -f "${RESOLVED_TLS_KEY_PATH}" ] \
+  && ! cmp -s "${RESOLVED_TLS_CERT_PATH}" "${GRPC_CERTS_DIR}/server.crt" 2>/dev/null; then
+  GRPC_CERTS_NEED_REGEN=true
+fi
+if [ "${GRPC_CERTS_NEED_REGEN}" = "true" ]; then
+  if [ "${TLS_MODE}" = "self-signed" ] \
+    && [ -f "${RESOLVED_TLS_CERT_PATH}" ] && [ -f "${RESOLVED_TLS_KEY_PATH}" ]; then
+    log_info "Reusing the HTTP control plane TLS certificate for the gRPC transfer engine..."
+    mkdir -p "${GRPC_CERTS_DIR}"
+    cp "${RESOLVED_TLS_CERT_PATH}" "${GRPC_CERTS_DIR}/server.crt"
+    cp "${RESOLVED_TLS_KEY_PATH}" "${GRPC_CERTS_DIR}/server.key"
   else
-    (cd "${INSTALL_DIR}" && "${BUN_BIN}" run scripts/generate-server-tls-cert.ts "${GRPC_TLS_HOSTNAME}" "${GRPC_CERTS_DIR}")
+    log_info "Generating the mandatory gRPC transfer engine TLS certificate..."
+    if is_ip "${GRPC_TLS_HOSTNAME}"; then
+      (cd "${INSTALL_DIR}" && "${BUN_BIN}" run scripts/generate-server-tls-cert.ts "${GRPC_TLS_HOSTNAME}" "${TLS_SERVER_NAME_OVERRIDE}" "${GRPC_CERTS_DIR}")
+    else
+      (cd "${INSTALL_DIR}" && "${BUN_BIN}" run scripts/generate-server-tls-cert.ts "${GRPC_TLS_HOSTNAME}" "${GRPC_CERTS_DIR}")
+    fi
   fi
   chown -R "${SERVICE_USER}:${SERVICE_GROUP}" "${GRPC_CERTS_DIR}"
   chmod 640 "${GRPC_CERTS_DIR}/server.crt" "${GRPC_CERTS_DIR}/server.key"

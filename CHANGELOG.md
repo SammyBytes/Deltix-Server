@@ -9,6 +9,33 @@ Each entry starts with a **plain-language summary** (what changed, in
 everyday words) before any technical detail — written so someone outside
 engineering can understand what shipped and why it matters.
 
+## [0.6.16] - 2026-08-29
+
+**In plain terms:** the CLI trusts one certificate and uses it to validate
+both the HTTP control-plane (login) and the gRPC data-plane (push/pull). But
+`install.sh` had been generating two *different* self-signed certificates --
+one for HTTP and a separate one for gRPC -- so after `deltix configure`
+trusted the gRPC cert, `deltix login` failed with `self signed certificate`
+(and, without the `NODE_TLS_REJECT_UNAUTHORIZED=0` env var being set,
+everything over HTTP broke). The installer now makes both ports present the
+identical certificate and repairs existing installs whose certs differ.
+
+### Fixed
+
+- **`deltix login` / `deltix push` failed with `self signed certificate`
+  whenever `NODE_TLS_REJECT_UNAUTHORIZED=0` was not set.** The HTTP control
+  plane (cert `certs/server.crt`) and the gRPC transfer engine (cert
+  `certs/grpc/server.crt`) were serving *separate* self-signed certificates.
+  `deltix configure` fetches and trusts a single cert (from the gRPC port)
+  and the CLI validates the HTTP control plane with that same CA, so the very
+  first HTTP call (`login`, ticket issuance) rejected the mismatched HTTP
+  cert. This had gone unnoticed during testing because the insecure
+  `NODE_TLS_REJECT_UNAUTHORIZED=0` env var masks it. In `self-signed` mode
+  `install.sh` now reuses the HTTP cert for the gRPC engine, and repairs an
+  existing install whenever the two are detected to differ (via `cmp`), so one
+  trusted cert works for both ports. The auto-detected hostname/SAN behavior
+  is unchanged.
+
 ## [0.6.15] - 2026-08-28
 
 **In plain terms:** if an operator removed the server's certificate files (for
