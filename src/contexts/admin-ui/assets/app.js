@@ -79,6 +79,8 @@ const ICON_SHIELD =
   '<path d="M10 3l6 2v5c0 4-2.5 6.5-6 7-3.5-.5-6-3-6-7V5l6-2z" stroke-linecap="round" stroke-linejoin="round" /><path d="M7.5 10l1.8 1.8L12.5 8" stroke-linecap="round" stroke-linejoin="round" />';
 const ICON_TRASH =
   '<path d="M4 6h12M8 6V4.5A1.5 1.5 0 019.5 3h1A1.5 1.5 0 0112 4.5V6M6 6l.6 9.4A1.5 1.5 0 008.1 17h3.8a1.5 1.5 0 001.5-1.6L14 6" stroke-linecap="round" stroke-linejoin="round" />';
+const ICON_REPO =
+  '<ellipse cx="10" cy="5" rx="6" ry="2.4" /><path d="M4 5v10c0 1.3 2.7 2.4 6 2.4s6-1.1 6-2.4V5" /><path d="M4 10c0 1.3 2.7 2.4 6 2.4s6-1.1 6-2.4" stroke-linecap="round" stroke-linejoin="round" />';
 
 function iconButton(iconSvgPath, title, extraClass) {
   const btn = document.createElement('button');
@@ -775,7 +777,7 @@ function renderUsers(users) {
   if (users.length === 0) {
     const emptyRow = document.createElement('tr');
     emptyRow.id = 'user-empty-row';
-    emptyRow.innerHTML = '<td colspan="7" class="px-3 py-4 text-center text-neutral-500">No users created yet.</td>';
+    emptyRow.innerHTML = '<td colspan="8" class="px-3 py-4 text-center text-neutral-500">No users created yet.</td>';
     userList.append(emptyRow);
     return;
   }
@@ -801,10 +803,17 @@ function renderUsers(users) {
     );
     adminToggleBtn.addEventListener('click', () => toggleGlobalAdmin(user));
 
+    const repoToggleBtn = iconButton(
+      ICON_REPO,
+      user.canCreateRepos ? 'Revoke repo-creation' : 'Grant repo-creation',
+      user.canCreateRepos ? 'text-sky-400 hover:text-neutral-300' : 'hover:text-sky-400',
+    );
+    repoToggleBtn.addEventListener('click', () => toggleCanCreateRepos(user));
+
     const deleteBtn = iconButton(ICON_TRASH, 'Delete user', 'hover:text-red-400 hover:border-red-900/60');
     deleteBtn.addEventListener('click', () => promptDeleteUser(user.username));
 
-    actionsWrap.append(toggleBtn, adminToggleBtn, deleteBtn);
+    actionsWrap.append(toggleBtn, adminToggleBtn, repoToggleBtn, deleteBtn);
     actions.append(actionsWrap);
 
     const statusBadge = user.active
@@ -815,15 +824,17 @@ function renderUsers(users) {
       '<td class="px-3 py-2 font-medium text-neutral-200"></td>' +
       '<td class="px-3 py-2">' + statusBadge + '</td>' +
       '<td class="px-3 py-2 text-neutral-300 font-mono text-[11px]"></td>' +
+      '<td class="px-3 py-2 text-neutral-300 font-mono text-[11px]"></td>' +
       '<td class="px-3 py-2 text-neutral-500 font-mono text-[11px]"></td>' +
       '<td class="px-3 py-2 font-mono text-neutral-300"></td>' +
       '<td class="px-3 py-2 text-neutral-500 font-mono text-[11px]"></td>';
 
     row.children[0].textContent = user.username;
     row.children[2].textContent = user.isGlobalAdmin ? 'Yes (Global)' : 'No';
-    row.children[3].textContent = new Date(user.createdAt).toLocaleString();
-    row.children[4].textContent = String(user.activeSessions);
-    row.children[5].textContent = user.lastLoginAt ? new Date(user.lastLoginAt).toLocaleString() : 'Never';
+    row.children[3].textContent = user.canCreateRepos ? 'Yes' : 'No';
+    row.children[4].textContent = new Date(user.createdAt).toLocaleString();
+    row.children[5].textContent = String(user.activeSessions);
+    row.children[6].textContent = user.lastLoginAt ? new Date(user.lastLoginAt).toLocaleString() : 'Never';
     row.append(actions);
     userList.append(row);
   }
@@ -845,6 +856,31 @@ async function toggleGlobalAdmin(user) {
     setInlineMessage(userMessage, msg, false);
     showToast(msg + ' for ' + user.username, false);
     logAuditEvent('User global-admin toggled', { username: user.username, isGlobalAdmin: !user.isGlobalAdmin });
+    await loadUsers();
+  } catch {
+    setInlineMessage(userMessage, 'Could not reach server.', true);
+  }
+}
+
+async function toggleCanCreateRepos(user) {
+  try {
+    const res = await fetch(
+      '/api/v1/auth/users/' + encodeURIComponent(user.username) + '/can-create-repos',
+      { method: user.canCreateRepos ? 'DELETE' : 'POST', headers: authHeaders() },
+    );
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      setInlineMessage(userMessage, data.error || 'Could not update repo-creation permission.', true);
+      showToast('Could not update repo-creation permission', true);
+      return;
+    }
+    const msg = user.canCreateRepos ? 'Repo-creation revoked' : 'Repo-creation granted';
+    setInlineMessage(userMessage, msg, false);
+    showToast(msg + ' for ' + user.username, false);
+    logAuditEvent('User can-create-repos toggled', {
+      username: user.username,
+      canCreateRepos: !user.canCreateRepos,
+    });
     await loadUsers();
   } catch {
     setInlineMessage(userMessage, 'Could not reach server.', true);
