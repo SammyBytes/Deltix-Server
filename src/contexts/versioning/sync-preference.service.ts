@@ -114,7 +114,6 @@ export class SyncPreferenceService {
     const normalizedTables = normalizeTables(request.tables);
     const edges = normalizedTables ? await this.readForeignKeyEdges(repo.doltPath) : [];
     const plan = this.buildPlan(request.mode, normalizedTables, edges);
-    this.assertNoExcludedDependencies(plan);
     return plan;
   }
 

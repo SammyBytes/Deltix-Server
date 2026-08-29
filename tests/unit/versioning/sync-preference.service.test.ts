@@ -69,9 +69,9 @@ describe('versioning/SyncPreferenceService', () => {
       },
     ]);
 
-    await expect(
-      service.preview('demo', { mode: 'schema_and_data', tables: ['orders'] }),
-    ).rejects.toBeInstanceOf(SyncPreferenceConflictError);
+    const plan = await service.preview('demo', { mode: 'schema_and_data', tables: ['orders'] });
+    expect(plan.resolvedTables).toEqual(['customers', 'orders', 'regions']);
+    expect(plan.autoIncludedTables).toEqual(['customers', 'regions']);
   });
 
   it('stores only an already-closed subset and re-validates it server-side on push', async () => {

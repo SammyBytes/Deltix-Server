@@ -45,6 +45,7 @@ export const runDoltCommit: RunDoltCommit = async ({
   authorName,
   jobId,
   checksum,
+  tables,
 }): Promise<string> => {
   const safeAuthor = sanitizeAuthorName(authorName);
   assertSafeSqlValue(jobId, 'jobId');
@@ -72,9 +73,14 @@ export const runDoltCommit: RunDoltCommit = async ({
     throw new Error(`dolt sql (insert) failed: ${insertRow.stderr.toString().trim()}`);
   }
 
-  const add = await $`dolt --data-dir ${doltPath} add -A`.quiet().nothrow();
-  if (add.exitCode !== 0) {
-    throw new Error(`dolt add failed: ${add.stderr.toString().trim()}`);
+  const addArgs = tables && tables.length > 0
+    ? ['--data-dir', doltPath, 'add', ...tables]
+    : ['--data-dir', doltPath, 'add', '-A'];
+  const addProc = Bun.spawn(['dolt', ...addArgs], { stdout: 'ignore', stderr: 'pipe' });
+  const addExitCode = await addProc.exited;
+  if (addExitCode !== 0) {
+    const addStderr = await new Response(addProc.stderr).text();
+    throw new Error(`dolt add failed: ${addStderr.trim()}`);
   }
 
   const commit =

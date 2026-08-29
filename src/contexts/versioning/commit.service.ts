@@ -24,6 +24,8 @@ export interface PushCommitParams {
   username: string;
   jobId: string;
   checksum: string;
+  /** Resolved table set from sync-prefs FK closure, if any. */
+  resolvedTables?: string[];
 }
 
 export type RunDoltCommit = (params: {
@@ -31,6 +33,7 @@ export type RunDoltCommit = (params: {
   authorName: string;
   jobId: string;
   checksum: string;
+  tables?: string[];
 }) => Promise<string>;
 
 export class CommitService {
@@ -55,6 +58,7 @@ export class CommitService {
         authorName: params.username,
         jobId: params.jobId,
         checksum: params.checksum,
+        tables: params.resolvedTables,
       });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);

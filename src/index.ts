@@ -250,8 +250,8 @@ async function main(): Promise<void> {
   const grpcEngine = await startGrpcTransferEngine(
     env,
     ticketService,
-    async ({ repo, username, jobId, checksum }) => {
-      const commitHash = await commitService.recordPush({ repo, username, jobId, checksum });
+    async ({ repo, username, jobId, checksum, resolvedTables }) => {
+      const commitHash = await commitService.recordPush({ repo, username, jobId, checksum, resolvedTables });
       if (commitHash) {
         logger.info({ repo, username, jobId, commitHash }, 'Recorded real Dolt commit for push');
       }
@@ -281,7 +281,7 @@ async function main(): Promise<void> {
         },
         'Validated push sync preferences before staging commit',
       );
-      return { repo, username, stagingPath, dryRun: validation.dryRun };
+      return { repo, username, stagingPath, dryRun: validation.dryRun, resolvedTables: validation.resolvedTables };
     },
   );
   logger.info(
