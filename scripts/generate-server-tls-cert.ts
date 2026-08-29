@@ -107,9 +107,7 @@ const primaryName = sanEntries[0] as string;
 // connections also match.
 const allAreIps = sanEntries.length > 0 && sanEntries.every(isIpAddress);
 const autoDnsName = allAreIps ? deriveHostDnsName() : undefined;
-const sanEntriesWithDns = allAreIps
-  ? [autoDnsName as string, ...sanEntries]
-  : sanEntries;
+const sanEntriesWithDns = allAreIps ? [autoDnsName as string, ...sanEntries] : sanEntries;
 
 const sanList = sanEntriesWithDns
   .map((name) => (isIpAddress(name) ? `IP:${name}` : `DNS:${name}`))
