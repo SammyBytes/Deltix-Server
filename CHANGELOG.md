@@ -9,6 +9,27 @@ Each entry starts with a **plain-language summary** (what changed, in
 everyday words) before any technical detail — written so someone outside
 engineering can understand what shipped and why it matters.
 
+## [0.8.1] - 2026-08-29
+
+**In plain terms:** the Admin UI now lets an administrator decide, per person,
+who is allowed to create new repositories — a simple toggle in the Users panel.
+(The commit-based push/pull server work from 0.8.0 is unchanged; this release
+simply ships the admin-UI permission toggle, which landed after 0.8.0 was cut.)
+
+### Added
+
+- **Admin UI — per-user "Can Create Repos" toggle (Fase 5.9).** The Users panel
+  gained a column and a row action that grants/revokes the `canCreateRepos`
+  permission on a specific user, via the existing
+  `POST`/`DELETE /api/v1/auth/users/:username/can-create-repos` endpoints. This
+  is managed at the *user* level (a person's ability to open new repos), not at
+  the repository level. Global admins always bypass the check.
+
+### Tests
+
+- 277 unit tests + admin-ui unit + admin-user-management smoke pass; build +
+  lint clean.
+
 ## [0.8.0] - 2026-08-29
 
 **In plain terms:** this release adds the *other half* of the Git-like loop: a
