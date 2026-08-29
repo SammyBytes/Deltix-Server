@@ -65,6 +65,7 @@ describe('transfer boot smoke test (real subprocess, real HTTP server, real tick
       active: true,
       lastLoginAt: null,
       isGlobalAdmin: false,
+      canCreateRepos: true,
     });
     for (const repoId of ['org/repo', 'org/other-repo']) {
       await userStore.upsertRepoRole({

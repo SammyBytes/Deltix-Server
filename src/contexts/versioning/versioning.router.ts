@@ -288,6 +288,11 @@ export function createVersioningRouter(
       return c.json({ error: 'Unauthorized' }, 401);
     }
 
+    // Only users with canCreateRepos flag (or global admins) may create repos.
+    if (!(await authService.canUserCreateRepos(username))) {
+      return c.json({ error: 'User cannot create repos' }, 403);
+    }
+
     const parsed = provisionRequestSchema.safeParse(await c.req.json().catch(() => null));
     if (!parsed.success) {
       return c.json({ error: 'Invalid request body', details: parsed.error.issues }, 400);

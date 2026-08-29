@@ -40,6 +40,7 @@ describe('transfer/transfer.router (integration, real HTTP requests via Hono.fet
       active: true,
       lastLoginAt: null,
       isGlobalAdmin: false,
+      canCreateRepos: true,
     });
     const { privateKeyPem, publicKeyPem } = generateTestEd25519KeyPairPem();
 

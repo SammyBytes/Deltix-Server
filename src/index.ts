@@ -23,6 +23,7 @@ import {
   createNasSyncService,
   createStorageRouter,
   NasSyncWorker,
+  PushSessionAbortedError,
   startGrpcTransferEngine,
 } from './contexts/storage';
 import {
@@ -257,6 +258,19 @@ async function main(): Promise<void> {
       }
     },
     async ({ repo, username, stagingPath, syncOptions }) => {
+      // Auto-creation: if the repo doesn't exist yet, check permission and provision.
+      const existing = await repoProvisioningService.get(repo);
+      if (!existing) {
+        if (!(await authService.canUserCreateRepos(username))) {
+          throw new PushSessionAbortedError(
+            `User "${username}" cannot create repos — ask a global admin to grant canCreateRepos`,
+          );
+        }
+        const record = await repoProvisioningService.provision(repo, username);
+        await authService.grantRepoAdminToCreator(record.repoId, username);
+        logger.info({ repo, username }, 'Auto-created repo on first push');
+      }
+
       const parsed = (syncOptions ?? null) as {
         mode?: 'schema_only' | 'schema_and_data';
         tables?: string[] | null;

@@ -45,6 +45,7 @@ describe('auth/auth.service (integration, real libSQL + real JWT signing)', () =
       active: true,
       lastLoginAt: null,
       isGlobalAdmin: false,
+      canCreateRepos: true,
     });
 
     service = new AuthService(
@@ -157,5 +158,74 @@ describe('auth/auth.service (integration, real libSQL + real JWT signing)', () =
     ).rejects.toThrow();
 
     await rm(emptyDir, { recursive: true, force: true });
+  });
+
+  it('login returns canCreateRepos flag from user record', async () => {
+    const result = await service.login('alice', 's3cret-pass');
+    expect(result.canCreateRepos).toBe(true);
+  });
+
+  it('refresh returns canCreateRepos flag from user record', async () => {
+    const { refreshToken } = await service.login('alice', 's3cret-pass');
+    const refreshed = await service.refresh(refreshToken);
+    expect(refreshed.canCreateRepos).toBe(true);
+  });
+
+  it('setCanCreateRepos toggles the flag and affects login result', async () => {
+    await service.setCanCreateRepos('alice', false);
+    const result = await service.login('alice', 's3cret-pass');
+    expect(result.canCreateRepos).toBe(false);
+
+    await service.setCanCreateRepos('alice', true);
+    const result2 = await service.login('alice', 's3cret-pass');
+    expect(result2.canCreateRepos).toBe(true);
+  });
+
+  it('canUserCreateRepos returns true for global admins even without the flag', async () => {
+    await service.createUser({
+      username: 'bob',
+      password: 's3cret-pass',
+      createdBy: 'test',
+      isGlobalAdmin: true,
+      canCreateRepos: false,
+    });
+    expect(await service.canUserCreateRepos('bob')).toBe(true);
+  });
+
+  it('canUserCreateRepos returns false when flag is off and not admin', async () => {
+    await service.createUser({
+      username: 'charlie',
+      password: 's3cret-pass',
+      createdBy: 'test',
+      isGlobalAdmin: false,
+      canCreateRepos: false,
+    });
+    expect(await service.canUserCreateRepos('charlie')).toBe(false);
+  });
+
+  it('canUserCreateRepos returns true when flag is on', async () => {
+    await service.createUser({
+      username: 'dave',
+      password: 's3cret-pass',
+      createdBy: 'test',
+      isGlobalAdmin: false,
+      canCreateRepos: true,
+    });
+    expect(await service.canUserCreateRepos('dave')).toBe(true);
+  });
+
+  it('canUserCreateRepos returns false for nonexistent user', async () => {
+    expect(await service.canUserCreateRepos('nonexistent')).toBe(false);
+  });
+
+  it('listUsers includes canCreateRepos field', async () => {
+    const users = await service.listUsers();
+    const alice = users.find((u) => u.username === 'alice');
+    expect(alice).toBeDefined();
+    expect(alice!.canCreateRepos).toBe(true);
+  });
+
+  it('setCanCreateRepos throws for nonexistent user', async () => {
+    await expect(service.setCanCreateRepos('nonexistent', true)).rejects.toThrow();
   });
 });

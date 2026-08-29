@@ -42,6 +42,7 @@ describe('addons/addons.router (integration, real HTTP requests via Hono.fetch)'
       active: true,
       lastLoginAt: null,
       isGlobalAdmin: true,
+      canCreateRepos: true,
     });
     const { privateKeyPem, publicKeyPem } = generateTestEd25519KeyPairPem();
 
@@ -85,6 +86,7 @@ describe('addons/addons.router (integration, real HTTP requests via Hono.fetch)'
         active: true,
         lastLoginAt: null,
         isGlobalAdmin: false,
+        canCreateRepos: true,
       });
       const { accessToken } = await authService.login('nonadmin', 'reader-pass');
 

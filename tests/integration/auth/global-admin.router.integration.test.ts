@@ -43,6 +43,7 @@ describe('auth/auth.router global admin management (integration, real HTTP reque
       active: true,
       lastLoginAt: null,
       isGlobalAdmin: true,
+      canCreateRepos: true,
     });
     await userStore.create({
       username: 'bob',
@@ -52,6 +53,7 @@ describe('auth/auth.router global admin management (integration, real HTTP reque
       active: true,
       lastLoginAt: null,
       isGlobalAdmin: false,
+      canCreateRepos: true,
     });
 
     const service = new AuthService(

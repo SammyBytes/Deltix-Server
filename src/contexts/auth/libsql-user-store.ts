@@ -20,6 +20,9 @@ function rowToUser(row: Record<string, unknown>): UserRecord {
     // in AuthService, which promotes an existing sole user rather than
     // leaving every pre-existing installation locked out of its own panel.
     isGlobalAdmin: Number(row.is_global_admin ?? 0) === 1,
+    // Users created before this column existed default to canCreateRepos:
+    // true — the flag is only restrictive for new non-admin writers.
+    canCreateRepos: Number(row.can_create_repos ?? 1) === 1,
   };
 }
 
@@ -64,6 +67,11 @@ export class LibsqlUserStore implements UserStore {
     await this.client
       .execute(`ALTER TABLE users ADD COLUMN is_global_admin INTEGER NOT NULL DEFAULT 0`.trim())
       .catch(() => {});
+    // Migration for databases created before `can_create_repos` existed.
+    // Defaults to 1 (true) — existing users keep their ability to create repos.
+    await this.client
+      .execute(`ALTER TABLE users ADD COLUMN can_create_repos INTEGER NOT NULL DEFAULT 1`.trim())
+      .catch(() => {});
     await this.client.execute(`
       CREATE TABLE IF NOT EXISTS repo_roles (
         username TEXT NOT NULL,
@@ -84,7 +92,7 @@ export class LibsqlUserStore implements UserStore {
 
   async list(): Promise<UserRecord[]> {
     const result = await this.client.execute(
-      `SELECT username, password_hash, created_at, created_by, active, last_login_at, is_global_admin
+      `SELECT username, password_hash, created_at, created_by, active, last_login_at, is_global_admin, can_create_repos
        FROM users
        ORDER BY created_at ASC, username ASC`,
     );
@@ -93,7 +101,7 @@ export class LibsqlUserStore implements UserStore {
 
   async getByUsername(username: string): Promise<UserRecord | null> {
     const result = await this.client.execute({
-      sql: `SELECT username, password_hash, created_at, created_by, active, last_login_at, is_global_admin
+      sql: `SELECT username, password_hash, created_at, created_by, active, last_login_at, is_global_admin, can_create_repos
             FROM users WHERE username = ?`,
       args: [username],
     });
@@ -103,8 +111,8 @@ export class LibsqlUserStore implements UserStore {
 
   async create(user: UserRecord): Promise<void> {
     await this.client.execute({
-      sql: `INSERT INTO users (username, password_hash, created_at, created_by, active, last_login_at, is_global_admin)
-            VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      sql: `INSERT INTO users (username, password_hash, created_at, created_by, active, last_login_at, is_global_admin, can_create_repos)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       args: [
         user.username,
         user.passwordHash,
@@ -113,6 +121,7 @@ export class LibsqlUserStore implements UserStore {
         user.active ? 1 : 0,
         user.lastLoginAt,
         user.isGlobalAdmin ? 1 : 0,
+        user.canCreateRepos ? 1 : 0,
       ],
     });
   }
@@ -121,6 +130,14 @@ export class LibsqlUserStore implements UserStore {
     const result = await this.client.execute({
       sql: 'UPDATE users SET is_global_admin = ? WHERE username = ?',
       args: [isGlobalAdmin ? 1 : 0, username],
+    });
+    return result.rowsAffected === 1;
+  }
+
+  async setCanCreateRepos(username: string, canCreateRepos: boolean): Promise<boolean> {
+    const result = await this.client.execute({
+      sql: 'UPDATE users SET can_create_repos = ? WHERE username = ?',
+      args: [canCreateRepos ? 1 : 0, username],
     });
     return result.rowsAffected === 1;
   }
@@ -151,8 +168,8 @@ export class LibsqlUserStore implements UserStore {
 
   async tryCreateFirstUser(user: UserRecord): Promise<boolean> {
     const result = await this.client.execute({
-      sql: `INSERT INTO users (username, password_hash, created_at, created_by, active, last_login_at, is_global_admin)
-            SELECT ?, ?, ?, ?, ?, ?, ?
+      sql: `INSERT INTO users (username, password_hash, created_at, created_by, active, last_login_at, is_global_admin, can_create_repos)
+            SELECT ?, ?, ?, ?, ?, ?, ?, ?
             WHERE NOT EXISTS (SELECT 1 FROM users LIMIT 1)`,
       args: [
         user.username,
@@ -162,6 +179,7 @@ export class LibsqlUserStore implements UserStore {
         user.active ? 1 : 0,
         user.lastLoginAt,
         user.isGlobalAdmin ? 1 : 0,
+        user.canCreateRepos ? 1 : 0,
       ],
     });
     return result.rowsAffected === 1;

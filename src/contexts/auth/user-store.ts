@@ -12,6 +12,11 @@ export interface UserRecord {
   // (`/api/v1/auth/users*`). A per-repo `admin` role (see `RepoRole`) only
   // controls one repo and must never be treated as equivalent to this.
   isGlobalAdmin: boolean;
+  // Controls whether the user can create new Dolt repos (via POST /repos or
+  // auto-creation on first push). Distinct from isGlobalAdmin — an admin
+  // always bypasses this check, but a non-admin writer needs this flag
+  // explicitly granted.
+  canCreateRepos: boolean;
 }
 
 export interface LegacyUserRecord {
@@ -35,4 +40,5 @@ export interface UserStore {
   upsertRepoRole(assignment: RepoRoleAssignment): Promise<void>;
   deleteRepoRole(username: string, repoId: string): Promise<boolean>;
   setGlobalAdmin(username: string, isGlobalAdmin: boolean): Promise<boolean>;
+  setCanCreateRepos(username: string, canCreateRepos: boolean): Promise<boolean>;
 }

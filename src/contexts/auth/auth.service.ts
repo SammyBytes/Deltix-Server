@@ -82,6 +82,7 @@ export class AuthService {
       refreshToken,
       expiresInSeconds: this.config.accessTokenTtlSeconds,
       isGlobalAdmin: user.isGlobalAdmin,
+      canCreateRepos: user.canCreateRepos,
     };
   }
 
@@ -99,12 +100,14 @@ export class AuthService {
       this.config.accessTokenTtlSeconds,
     );
 
+    const user = await this.userStore.getByUsername(username);
     return {
       username,
       accessToken,
       refreshToken,
       expiresInSeconds: this.config.accessTokenTtlSeconds,
-      isGlobalAdmin: await this.isGlobalAdmin(username),
+      isGlobalAdmin: user?.isGlobalAdmin ?? false,
+      canCreateRepos: user?.canCreateRepos ?? false,
     };
   }
 
@@ -130,6 +133,7 @@ export class AuthService {
       input.password,
       input.createdBy,
       input.isGlobalAdmin ?? false,
+      input.canCreateRepos ?? true,
     );
     await this.userStore.create(record);
     return record;
@@ -145,6 +149,7 @@ export class AuthService {
         active: user.active,
         lastLoginAt: user.lastLoginAt,
         isGlobalAdmin: user.isGlobalAdmin,
+        canCreateRepos: user.canCreateRepos,
         activeSessions: await this.sessionStore.countActiveSessionsForUser(
           user.username,
           this.now(),
@@ -193,9 +198,29 @@ export class AuthService {
     }
   }
 
+  async setCanCreateRepos(username: string, canCreateRepos: boolean): Promise<void> {
+    const updated = await this.userStore.setCanCreateRepos(username, canCreateRepos);
+    if (!updated) {
+      throw new UserNotFoundError(username);
+    }
+  }
+
   async isGlobalAdmin(username: string): Promise<boolean> {
     const user = await this.userStore.getByUsername(username);
     return user?.isGlobalAdmin ?? false;
+  }
+
+  /**
+   * Returns true if the user can create new repos — either via the
+   * `canCreateRepos` flag or by being a global admin (who bypasses
+   * all per-feature gates).
+   */
+  async canUserCreateRepos(username: string): Promise<boolean> {
+    const user = await this.userStore.getByUsername(username);
+    if (!user) {
+      return false;
+    }
+    return user.isGlobalAdmin || user.canCreateRepos;
   }
 
   async getSetupStatus(): Promise<SetupStatus> {
@@ -393,6 +418,7 @@ export class AuthService {
     password: string,
     createdBy: string,
     isGlobalAdmin = false,
+    canCreateRepos = true,
   ): Promise<UserRecord> {
     return {
       username,
@@ -402,6 +428,7 @@ export class AuthService {
       active: true,
       lastLoginAt: null,
       isGlobalAdmin,
+      canCreateRepos,
     };
   }
 }

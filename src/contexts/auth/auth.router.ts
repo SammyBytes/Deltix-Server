@@ -27,6 +27,7 @@ const loginBodySchema = z.object({
 const createUserSchema = z.object({
   username: z.string().min(1).max(256),
   password: z.string().min(8).max(1024),
+  canCreateRepos: z.boolean().optional(),
 });
 
 const sessionTokenBodySchema = z.object({
@@ -252,6 +253,7 @@ export function createAuthRouter(authService: AuthService, secureCookies = true)
             createdAt: user.createdAt,
             active: true,
             isGlobalAdmin: user.isGlobalAdmin,
+            canCreateRepos: user.canCreateRepos,
           },
         },
         201,
@@ -364,6 +366,49 @@ export function createAuthRouter(authService: AuthService, secureCookies = true)
     }
     try {
       await authService.setGlobalAdmin(target, false);
+      return c.json({ ok: true }, 200);
+    } catch (err) {
+      if (err instanceof UserNotFoundError) {
+        return c.json({ error: err.message }, 404);
+      }
+      throw err;
+    }
+  });
+
+  // --- canCreateRepos management ---
+  // Controls whether a non-admin user can create new Dolt repos (via
+  // POST /repos or auto-creation on first push). Global admins always
+  // bypass this check.
+
+  app.post('/users/:username/can-create-repos', async (c) => {
+    const caller = await authenticateBearerToken(c.req.header('authorization'), authService);
+    if (!caller) {
+      return c.json({ error: 'Unauthorized' }, 401);
+    }
+    if (!(await authService.isGlobalAdmin(caller))) {
+      return c.json({ error: 'Global admin access required' }, 403);
+    }
+    try {
+      await authService.setCanCreateRepos(c.req.param('username'), true);
+      return c.json({ ok: true }, 200);
+    } catch (err) {
+      if (err instanceof UserNotFoundError) {
+        return c.json({ error: err.message }, 404);
+      }
+      throw err;
+    }
+  });
+
+  app.delete('/users/:username/can-create-repos', async (c) => {
+    const caller = await authenticateBearerToken(c.req.header('authorization'), authService);
+    if (!caller) {
+      return c.json({ error: 'Unauthorized' }, 401);
+    }
+    if (!(await authService.isGlobalAdmin(caller))) {
+      return c.json({ error: 'Global admin access required' }, 403);
+    }
+    try {
+      await authService.setCanCreateRepos(c.req.param('username'), false);
       return c.json({ ok: true }, 200);
     } catch (err) {
       if (err instanceof UserNotFoundError) {

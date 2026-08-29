@@ -47,6 +47,7 @@ describe('versioning/versioning.router (integration, real HTTP requests via Hono
       active: true,
       lastLoginAt: null,
       isGlobalAdmin: false,
+      canCreateRepos: true,
     });
     await userStore.create({
       username: 'bob',
@@ -56,6 +57,7 @@ describe('versioning/versioning.router (integration, real HTTP requests via Hono
       active: true,
       lastLoginAt: null,
       isGlobalAdmin: false,
+      canCreateRepos: true,
     });
     const { privateKeyPem, publicKeyPem } = generateTestEd25519KeyPairPem();
 
@@ -411,12 +413,13 @@ describe('versioning/versioning.router (integration, real HTTP requests via Hono
       const res = await app.request('/repos/demo-repo/sync-preferences/dry-run', {
         method: 'POST',
         headers: { authorization: ['Bearer ', token].join(''), 'content-type': 'application/json' },
-        body: JSON.stringify({ mode: 'schema_only', tables: ['orders'] }),
+        body: JSON.stringify({ mode: 'schema_and_data', tables: ['orders'] }),
       });
 
-      expect(res.status).toBe(409);
-      const body = (await res.json()) as { error: string };
-      expect(body.error).toContain('FK dependencies');
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { plan: { resolvedTables: string[] | null; autoIncludedTables: string[] } };
+      expect(body.plan.resolvedTables).toEqual(['customers', 'orders']);
+      expect(body.plan.autoIncludedTables).toEqual(['customers']);
     });
   });
 
