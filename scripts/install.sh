@@ -495,22 +495,32 @@ if [ ! -f "${ENV_FILE}" ]; then
   log_info "Generating a self-signed Community license..."
   (cd "${INSTALL_DIR}" && "${BUN_BIN}" run scripts/generate-community-license.ts "$(hostname -f 2>/dev/null || hostname)") > "${LICENSE_SNIPPET}"
 
-  log_info "Generating the mandatory gRPC transfer engine TLS certificate..."
-  GRPC_TLS_HOSTNAME="${GRPC_TLS_HOSTNAME:-${TLS_HOSTNAME:-$(hostname -f 2>/dev/null || hostname)}}"
-  if is_ip "${GRPC_TLS_HOSTNAME}"; then
-    (cd "${INSTALL_DIR}" && "${BUN_BIN}" run scripts/generate-server-tls-cert.ts "${GRPC_TLS_HOSTNAME}" "${TLS_SERVER_NAME_OVERRIDE}" "${GRPC_CERTS_DIR}")
-  else
-    (cd "${INSTALL_DIR}" && "${BUN_BIN}" run scripts/generate-server-tls-cert.ts "${GRPC_TLS_HOSTNAME}" "${GRPC_CERTS_DIR}")
-  fi
-
   log_info "Initializing the Dolt anti-tamper commit log at ${DOLT_LICENSE_LOG_PATH}..."
   mkdir -p "${DOLT_LICENSE_LOG_PATH}"
   dolt config --global --add user.name deltix-server >/dev/null 2>&1 || true
   dolt config --global --add user.email deltix-server@localhost >/dev/null 2>&1 || true
   (cd "${DOLT_LICENSE_LOG_PATH}" && dolt init) >/dev/null
 
-  chown -R "${SERVICE_USER}:${SERVICE_GROUP}" "${DOLT_LICENSE_LOG_PATH}" "${GRPC_CERTS_DIR}" "${DATA_DIR}/keys"
+  chown -R "${SERVICE_USER}:${SERVICE_GROUP}" "${DOLT_LICENSE_LOG_PATH}" "${DATA_DIR}/keys"
   chmod 600 "${JWT_KEYPAIR_SNIPPET}" "${LICENSE_SNIPPET}"
+fi
+
+# The gRPC transfer engine's TLS certificate is generated whenever it is
+# missing -- not just on first install. Data-plane certs live under
+# ${DATA_DIR}/certs/grpc, which an operator may legitimately wipe (along with
+# the HTTP certs) to force fresh ones without touching deltix.env; if that
+# happens the server would otherwise fail to boot with
+# 'ENOENT .../certs/grpc/server.crt'. Regenerating it only when absent keeps
+# upgrades from churning a valid cert while recovering from a deleted one.
+GRPC_TLS_HOSTNAME="${GRPC_TLS_HOSTNAME:-${TLS_HOSTNAME:-$(hostname -f 2>/dev/null || hostname)}}"
+if [ ! -f "${GRPC_CERTS_DIR}/server.crt" ] || [ ! -f "${GRPC_CERTS_DIR}/server.key" ]; then
+  log_info "Generating the mandatory gRPC transfer engine TLS certificate..."
+  if is_ip "${GRPC_TLS_HOSTNAME}"; then
+    (cd "${INSTALL_DIR}" && "${BUN_BIN}" run scripts/generate-server-tls-cert.ts "${GRPC_TLS_HOSTNAME}" "${TLS_SERVER_NAME_OVERRIDE}" "${GRPC_CERTS_DIR}")
+  else
+    (cd "${INSTALL_DIR}" && "${BUN_BIN}" run scripts/generate-server-tls-cert.ts "${GRPC_TLS_HOSTNAME}" "${GRPC_CERTS_DIR}")
+  fi
+  chown -R "${SERVICE_USER}:${SERVICE_GROUP}" "${GRPC_CERTS_DIR}"
   chmod 640 "${GRPC_CERTS_DIR}/server.crt" "${GRPC_CERTS_DIR}/server.key"
 fi
 

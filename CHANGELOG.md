@@ -9,6 +9,30 @@ Each entry starts with a **plain-language summary** (what changed, in
 everyday words) before any technical detail — written so someone outside
 engineering can understand what shipped and why it matters.
 
+## [0.6.15] - 2026-08-28
+
+**In plain terms:** if an operator removed the server's certificate files (for
+example to force fresh ones, or as part of a cleanup) the service would go
+into an endless restart loop and never come back up, because the internal
+encrypted data-transfer certificate wasn't recreated. Updates now detect when
+that certificate is missing and create it again automatically, so the service
+comes back up on the next install run instead of crash-looping.
+
+### Fixed
+
+- **Server crash-looped with `ENOENT .../certs/grpc/server.crt` after the
+  certificate files were deleted.** The gRPC transfer engine's TLS cert was
+  only generated on the very first installation (guarded by `deltix.env` not
+  existing), so on an upgrade — or after an operator wiped
+  `${DATA_DIR}/certs` to force new certs — the data plane cert was never
+  recreated. `bindGrpcTransferServer` then failed at boot with
+  `ENOENT: /var/lib/deltix/certs/grpc/server.crt` and the service crashed in
+  a restart loop. `install.sh` now regenerates the gRPC cert whenever either
+  `server.crt` or `server.key` is missing — not just on first install —
+  while retaining an existing valid cert on normal upgrades (no churn). The
+  regenerated cert keeps the same auto-detected hostname/SAN behavior as the
+  HTTP cert (bare-IP servers get their machine hostname added as a DNS name).
+
 ## [0.6.14] - 2026-08-28
 
 **In plain terms:** if a company's Deltix server lives at a bare IP address
