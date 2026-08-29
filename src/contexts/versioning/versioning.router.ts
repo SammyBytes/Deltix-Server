@@ -5,6 +5,7 @@ import { createLogger } from '../../shared/logger';
 import type { AuthService, RepoRole } from '../auth';
 import { InvalidRepoRoleError, RepoRoleAssignmentNotFoundError, UserNotFoundError } from '../auth';
 import type { BranchService } from './branch.service';
+import type { CommitExportService } from './commit-export.service';
 import type { CommitImportService } from './commit-import.service';
 import type { DiffService } from './diff.service';
 import {
@@ -281,6 +282,7 @@ export function createVersioningRouter(
   logService?: LogService,
   diffService?: DiffService,
   commitImportService?: CommitImportService,
+  commitExportService?: CommitExportService,
 ): Hono {
   const app = new Hono();
 
@@ -684,6 +686,74 @@ export function createVersioningRouter(
         logger.error({ err, repoId: c.req.param('repoId') }, 'Failed to import commits');
         return c.json({ error: 'Failed to import commits' }, 500);
       }
+    });
+  }
+
+  // --- Fase 5.9: pull (export) endpoints ---
+  // Read-side mirror of push-commits. `refs` lets a client negotiate what it
+  // already has; `pull-commits` streams the missing commits as NDJSON so a
+  // first clone of a large repo stays flat in memory.
+  if (commitExportService) {
+    app.get('/repos/:repoId/refs', async (c) => {
+      const access = await authorizeRepoRequest(c, authService, 'reader');
+      if (!('username' in access)) {
+        return access;
+      }
+      try {
+        const refs = await commitExportService.listRefs(c.req.param('repoId'));
+        return c.json({ refs }, 200);
+      } catch (err) {
+        if (err instanceof RepoNotFoundError) {
+          return c.json({ error: err.message }, 404);
+        }
+        logger.error({ err, repoId: c.req.param('repoId') }, 'Failed to list refs');
+        return c.json({ error: 'Failed to list refs' }, 500);
+      }
+    });
+
+    app.get('/repos/:repoId/pull-commits', async (c) => {
+      const access = await authorizeRepoRequest(c, authService, 'reader');
+      if (!('username' in access)) {
+        return access;
+      }
+      const repoId = c.req.param('repoId');
+      const branch = c.req.query('branch') ?? 'main';
+      const from = c.req.query('from') ?? null;
+
+      let head: string | null;
+      try {
+        head = await commitExportService.getBranchHead(repoId, branch);
+      } catch (err) {
+        if (err instanceof RepoNotFoundError) {
+          return c.json({ error: err.message }, 404);
+        }
+        throw err;
+      }
+      if (head === null) {
+        return c.json({ error: `Branch not found: ${branch}` }, 404);
+      }
+
+      const encoder = new TextEncoder();
+      const stream = new ReadableStream<Uint8Array>({
+        async start(controller) {
+          try {
+            for await (const commit of commitExportService.streamCommits(repoId, branch, from)) {
+              controller.enqueue(encoder.encode(`${JSON.stringify(commit)}\n`));
+            }
+            controller.close();
+          } catch (err) {
+            controller.error(err);
+          }
+        },
+      });
+      logger.info({ repoId, branch, from, head }, 'Streaming pull-commits (NDJSON)');
+      return new Response(stream, {
+        status: 200,
+        headers: {
+          'content-type': 'application/x-ndjson',
+          'x-deltix-server-head': head,
+        },
+      });
     });
   }
 
