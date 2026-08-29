@@ -5,6 +5,7 @@ import { createLogger } from '../../shared/logger';
 import type { AuthService, RepoRole } from '../auth';
 import { InvalidRepoRoleError, RepoRoleAssignmentNotFoundError, UserNotFoundError } from '../auth';
 import type { BranchService } from './branch.service';
+import type { CommitImportService } from './commit-import.service';
 import type { DiffService } from './diff.service';
 import {
   BranchAlreadyExistsError,
@@ -279,6 +280,7 @@ export function createVersioningRouter(
   mergeService?: MergeService,
   logService?: LogService,
   diffService?: DiffService,
+  commitImportService?: CommitImportService,
 ): Hono {
   const app = new Hono();
 
@@ -614,6 +616,65 @@ export function createVersioningRouter(
         logger.error({ err, repoId: c.req.param('repoId') }, 'Failed to preview sync preference');
         const handled = handleSyncError(err, 'Failed to preview sync preference');
         return c.json(handled.body, handled.status as 400 | 403 | 404 | 409 | 500);
+      }
+    });
+  }
+
+  // --- Fase 4b: push-commits endpoint ---
+  // Accepts structured commit data from client and imports into server Dolt repo.
+  if (commitImportService) {
+    const commitSchema = z.object({
+      message: z.string().min(1).max(1024),
+      author: z.string().min(1).max(256),
+      tables: z.array(
+        z.object({
+          name: z.string().min(1).max(128),
+          data: z.string(),
+        }),
+      ).min(1).max(256),
+    });
+
+    const pushCommitsBodySchema = z.object({
+      commits: z.array(commitSchema).min(1).max(100),
+    });
+
+    app.post('/repos/:repoId/push-commits', async (c) => {
+      const username = await authenticate(c.req.header('authorization'), authService);
+      if (!username) {
+        return c.json({ error: 'Unauthorized' }, 401);
+      }
+
+      // OWASP: writer or admin role required for push
+      const role = await authService.getRepoRole(username, c.req.param('repoId'));
+      if (!role || (role !== 'writer' && role !== 'admin')) {
+        logger.warn(
+          { username, repoId: c.req.param('repoId'), role },
+          'Push-commits denied: insufficient repo role',
+        );
+        return c.json({ error: 'User lacks writer access to repo' }, 403);
+      }
+
+      const parsed = pushCommitsBodySchema.safeParse(await c.req.json().catch(() => null));
+      if (!parsed.success) {
+        return c.json({ error: 'Invalid request body', details: parsed.error.issues }, 400);
+      }
+
+      try {
+        const result = await commitImportService.importCommits(
+          c.req.param('repoId'),
+          parsed.data.commits,
+        );
+        logger.info(
+          { username, repoId: result.repo, commitHash: result.commitHash, commits: parsed.data.commits.length },
+          'Commits imported via push-commits endpoint',
+        );
+        return c.json({ commitHash: result.commitHash }, 201);
+      } catch (err) {
+        if (err instanceof CommitImportError) {
+          return c.json({ error: err.message }, 400);
+        }
+        logger.error({ err, repoId: c.req.param('repoId') }, 'Failed to import commits');
+        return c.json({ error: 'Failed to import commits' }, 500);
       }
     });
   }
