@@ -1,7 +1,7 @@
 import type { Env } from '../../shared/env';
 import { BranchService } from './branch.service';
-import { CommitImportService } from './commit-import.service';
 import { CommitService } from './commit.service';
+import { CommitImportService } from './commit-import.service';
 import { DiffService } from './diff.service';
 import {
   runDoltCheckoutBranch,
@@ -11,8 +11,8 @@ import {
   runDoltListBranches,
 } from './dolt-branch-cli';
 import { runDoltInit } from './dolt-cli';
-import { runDoltCommitImport } from './dolt-commit-import-cli';
 import { runDoltCommit } from './dolt-commit-cli';
+import { runDoltCommitImport } from './dolt-commit-import-cli';
 import { runDoltReadDiff } from './dolt-diff-cli';
 import { readForeignKeyEdges } from './dolt-foreign-key-reader';
 import { runDoltReadLog } from './dolt-log-cli';

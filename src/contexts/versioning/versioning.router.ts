@@ -626,12 +626,15 @@ export function createVersioningRouter(
     const commitSchema = z.object({
       message: z.string().min(1).max(1024),
       author: z.string().min(1).max(256),
-      tables: z.array(
-        z.object({
-          name: z.string().min(1).max(128),
-          data: z.string(),
-        }),
-      ).min(1).max(256),
+      tables: z
+        .array(
+          z.object({
+            name: z.string().min(1).max(128),
+            data: z.string(),
+          }),
+        )
+        .min(1)
+        .max(256),
     });
 
     const pushCommitsBodySchema = z.object({
@@ -665,7 +668,12 @@ export function createVersioningRouter(
           parsed.data.commits,
         );
         logger.info(
-          { username, repoId: result.repo, commitHash: result.commitHash, commits: parsed.data.commits.length },
+          {
+            username,
+            repoId: result.repo,
+            commitHash: result.commitHash,
+            commits: parsed.data.commits.length,
+          },
           'Commits imported via push-commits endpoint',
         );
         return c.json({ commitHash: result.commitHash }, 201);

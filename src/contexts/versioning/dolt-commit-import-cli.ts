@@ -92,10 +92,9 @@ export const runDoltCommitImport: RunDoltCommitImport = async ({
   }
 
   // Commit with original message and author
-  const commit =
-    await $`dolt --data-dir ${doltPath} commit --author=${authorFlag} -m ${message}`
-      .quiet()
-      .nothrow();
+  const commit = await $`dolt --data-dir ${doltPath} commit --author=${authorFlag} -m ${message}`
+    .quiet()
+    .nothrow();
   if (commit.exitCode !== 0) {
     throw new Error(`dolt commit failed: ${commit.stderr.toString().trim()}`);
   }

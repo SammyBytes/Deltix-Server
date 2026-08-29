@@ -73,9 +73,10 @@ export const runDoltCommit: RunDoltCommit = async ({
     throw new Error(`dolt sql (insert) failed: ${insertRow.stderr.toString().trim()}`);
   }
 
-  const addArgs = tables && tables.length > 0
-    ? ['--data-dir', doltPath, 'add', ...tables]
-    : ['--data-dir', doltPath, 'add', '-A'];
+  const addArgs =
+    tables && tables.length > 0
+      ? ['--data-dir', doltPath, 'add', ...tables]
+      : ['--data-dir', doltPath, 'add', '-A'];
   const addProc = Bun.spawn(['dolt', ...addArgs], { stdout: 'ignore', stderr: 'pipe' });
   const addExitCode = await addProc.exited;
   if (addExitCode !== 0) {

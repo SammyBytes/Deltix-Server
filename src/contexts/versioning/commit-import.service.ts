@@ -51,10 +51,7 @@ export class CommitImportService {
    * Imports a batch of commits into the server-side Dolt repo.
    * Returns the commit hash of the last imported commit.
    */
-  async importCommits(
-    repoId: string,
-    commits: ImportedCommit[],
-  ): Promise<CommitImportResult> {
+  async importCommits(repoId: string, commits: ImportedCommit[]): Promise<CommitImportResult> {
     const record = await this.store.get(repoId);
     if (!record) {
       throw new CommitImportError('lookup', `Repo "${repoId}" not found`);

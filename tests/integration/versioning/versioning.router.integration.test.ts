@@ -417,7 +417,9 @@ describe('versioning/versioning.router (integration, real HTTP requests via Hono
       });
 
       expect(res.status).toBe(200);
-      const body = (await res.json()) as { plan: { resolvedTables: string[] | null; autoIncludedTables: string[] } };
+      const body = (await res.json()) as {
+        plan: { resolvedTables: string[] | null; autoIncludedTables: string[] };
+      };
       expect(body.plan.resolvedTables).toEqual(['customers', 'orders']);
       expect(body.plan.autoIncludedTables).toEqual(['customers']);
     });
