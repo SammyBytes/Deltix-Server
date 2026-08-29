@@ -98,6 +98,7 @@ async function main(): Promise<void> {
   const {
     repoProvisioningService,
     commitService,
+    commitImportService,
     branchService,
     mergeService,
     logService,
@@ -133,6 +134,7 @@ async function main(): Promise<void> {
     mergeService,
     logService,
     diffService,
+    commitImportService,
   );
   const app = new Hono();
   applySecurityMiddleware(app, { allowedOrigins: env.DELTIX_CORS_ALLOWED_ORIGINS });
