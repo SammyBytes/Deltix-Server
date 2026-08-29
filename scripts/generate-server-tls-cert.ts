@@ -28,10 +28,29 @@
  */
 
 import { existsSync, mkdirSync } from 'node:fs';
+import { hostname as osHostname } from 'node:os';
 import { resolve } from 'node:path';
 
 function isIpAddress(value: string): boolean {
   return /^(\d{1,3}\.){3}\d{1,3}$/.test(value) || value.includes(':');
+}
+
+/**
+ * When all requested identities are bare IPs, this script auto-derives a
+ * machine-specific DNS-style name (this host's FQDN, falling back to the
+ * short hostname) and adds it to the certificate's SAN. Node/gRPC and Bun
+ * refuse to verify a bare IP as a TLS server name, so clients connecting to
+ * the IP need a real, unique, non-IP name to present — which they can get
+ * from the server operator/install summary without hard-coding any one
+ * vendor's address. An explicit DNS argument (e.g. a FQDN the company knows
+ * for this box) always wins over this auto-derivation.
+ */
+function deriveHostDnsName(): string {
+  const fqdn = process.env.HOSTNAME_FQDN;
+  if (fqdn && !isIpAddress(fqdn)) return fqdn;
+  const hostname = osHostname();
+  if (hostname && !isIpAddress(hostname)) return hostname;
+  return 'deltix-server';
 }
 
 function usageAndExit(): never {
@@ -77,7 +96,22 @@ if (existsSync(keyPath) || existsSync(certPath)) {
 }
 
 const primaryName = sanEntries[0] as string;
-const sanList = sanEntries
+
+// If every requested SAN is an IP address (the common "bare IP server" case),
+// Node/gRPC and Bun refuse to use an IP as a TLS ServerName / SNI value (they
+// throw `ERR_INVALID_ARG_VALUE: Setting the TLS ServerName to an IP address
+// is not permitted`), so a CLI pointed at the IP could never verify the cert.
+// Auto-derive this host's DNS-style name and add it to the SAN so there's
+// always a real, machine-unique hostname a client can present as its
+// server-name override, while still keeping the real IP so direct-IP
+// connections also match.
+const allAreIps = sanEntries.length > 0 && sanEntries.every(isIpAddress);
+const autoDnsName = allAreIps ? deriveHostDnsName() : undefined;
+const sanEntriesWithDns = allAreIps
+  ? [autoDnsName as string, ...sanEntries]
+  : sanEntries;
+
+const sanList = sanEntriesWithDns
   .map((name) => (isIpAddress(name) ? `IP:${name}` : `DNS:${name}`))
   // Always also cover 127.0.0.1/localhost so local health checks and
   // loopback tooling work regardless of what the operator passed in.
@@ -128,3 +162,11 @@ console.log(
     'CA. For the CLI, point DELTIX_GRPC_TLS_CA_PATH (or the equivalent HTTPS CA trust option) ' +
     `at ${certPath} on each machine that needs to connect without a manual prompt.`,
 );
+
+if (allAreIps) {
+  console.log(
+    `\nYou requested an IP address, so this certificate also includes DNS:${autoDnsName} ` +
+      '(Node/gRPC cannot verify a bare IP as a TLS server name). On each CLI client, set the ' +
+      `server-name override to \`${autoDnsName}\` when the server is reached by its IP.`,
+  );
+}

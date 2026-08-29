@@ -219,6 +219,22 @@ TLS_HOSTNAME="${TLS_HOSTNAME:-}"
 TLS_CERT_PATH="${TLS_CERT_PATH:-}"
 TLS_KEY_PATH="${TLS_KEY_PATH:-}"
 
+# Node/gRPC and Bun refuse to use an IP address as a TLS server name (SNI), so
+# a server reached only by its bare IP would be unverifiable by the CLI. When
+# that happens we put a *real*, machine-specific DNS-style name in the
+# certificate's SAN that every client can present as its server-name override.
+# We never hard-code one: we auto-detect this host's FQDN (falling back to the
+# short hostname) -- unique per server, available on every company's box with
+# zero configuration -- and let an operator override it via
+# TLS_SERVER_NAME_OVERRIDE when their network has a specific name in mind.
+TLS_SERVER_NAME_OVERRIDE="${TLS_SERVER_NAME_OVERRIDE:-$(hostname -f 2>/dev/null || hostname)}"
+
+is_ip() {
+  # matches IPv4 (a.b.c.d) or anything containing ':' (IPv6)
+  [ -z "$1" ] && return 1
+  [[ "$1" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]] || [[ "$1" == *:* ]]
+}
+
 # ------------------------------------------------------------------------------
 # Persisted TLS choice — so an upgrade re-run does not ask for the certificate
 # paths all over again. The first time TLS credentials are configured we write
@@ -419,7 +435,13 @@ RESOLVED_TLS_CERT_PATH=""
 RESOLVED_TLS_KEY_PATH=""
 if [ "${TLS_MODE}" = "self-signed" ]; then
   log_info "Generating a self-signed TLS certificate for '${TLS_HOSTNAME}'..."
-  (cd "${INSTALL_DIR}" && "${BUN_BIN}" run scripts/generate-server-tls-cert.ts "${TLS_HOSTNAME}" "${DATA_DIR}/certs")
+  if is_ip "${TLS_HOSTNAME}"; then
+    # A bare-IP host needs a DNS-style name in the SAN so the CLI (gRPC/Node)
+    # can verify the server with a non-IP server-name override.
+    (cd "${INSTALL_DIR}" && "${BUN_BIN}" run scripts/generate-server-tls-cert.ts "${TLS_HOSTNAME}" "${TLS_SERVER_NAME_OVERRIDE}" "${DATA_DIR}/certs")
+  else
+    (cd "${INSTALL_DIR}" && "${BUN_BIN}" run scripts/generate-server-tls-cert.ts "${TLS_HOSTNAME}" "${DATA_DIR}/certs")
+  fi
   RESOLVED_TLS_CERT_PATH="${DATA_DIR}/certs/server.crt"
   RESOLVED_TLS_KEY_PATH="${DATA_DIR}/certs/server.key"
   chown "${SERVICE_USER}:${SERVICE_GROUP}" "${RESOLVED_TLS_CERT_PATH}" "${RESOLVED_TLS_KEY_PATH}"
@@ -438,6 +460,7 @@ if [ "${TLS_MODE}" != "none" ]; then
     echo "# to offer previously used certificate paths (so upgrades don't re-prompt)."
     echo "TLS_MODE=${TLS_MODE}"
     [ -n "${TLS_HOSTNAME}" ] && echo "TLS_HOSTNAME=${TLS_HOSTNAME}"
+    [ -n "${TLS_SERVER_NAME_OVERRIDE:-}" ] && echo "TLS_SERVER_NAME_OVERRIDE=${TLS_SERVER_NAME_OVERRIDE}"
     [ -n "${RESOLVED_TLS_CERT_PATH}" ] && echo "TLS_CERT_PATH=${RESOLVED_TLS_CERT_PATH}"
     [ -n "${RESOLVED_TLS_KEY_PATH}" ] && echo "TLS_KEY_PATH=${RESOLVED_TLS_KEY_PATH}"
   } > "${TLS_STATE_FILE}"
@@ -474,7 +497,11 @@ if [ ! -f "${ENV_FILE}" ]; then
 
   log_info "Generating the mandatory gRPC transfer engine TLS certificate..."
   GRPC_TLS_HOSTNAME="${GRPC_TLS_HOSTNAME:-${TLS_HOSTNAME:-$(hostname -f 2>/dev/null || hostname)}}"
-  (cd "${INSTALL_DIR}" && "${BUN_BIN}" run scripts/generate-server-tls-cert.ts "${GRPC_TLS_HOSTNAME}" "${GRPC_CERTS_DIR}")
+  if is_ip "${GRPC_TLS_HOSTNAME}"; then
+    (cd "${INSTALL_DIR}" && "${BUN_BIN}" run scripts/generate-server-tls-cert.ts "${GRPC_TLS_HOSTNAME}" "${TLS_SERVER_NAME_OVERRIDE}" "${GRPC_CERTS_DIR}")
+  else
+    (cd "${INSTALL_DIR}" && "${BUN_BIN}" run scripts/generate-server-tls-cert.ts "${GRPC_TLS_HOSTNAME}" "${GRPC_CERTS_DIR}")
+  fi
 
   log_info "Initializing the Dolt anti-tamper commit log at ${DOLT_LICENSE_LOG_PATH}..."
   mkdir -p "${DOLT_LICENSE_LOG_PATH}"

@@ -9,6 +9,43 @@ Each entry starts with a **plain-language summary** (what changed, in
 everyday words) before any technical detail — written so someone outside
 engineering can understand what shipped and why it matters.
 
+## [0.6.14] - 2026-08-28
+
+**In plain terms:** if a company's Deltix server lives at a bare IP address
+(no hostname), the client couldn't successfully push or pull files to it over
+TLS — the transfer started but was rejected at the security handshake, and the
+login screen worked but the actual data transfer never did. The server now
+automatically names each certificate with its own hostname (in addition to its
+IP) and the client setup detects and suggests that name, so a client pointed
+at any company's server can verify its certificate out of the box — without
+anyone hard-coding an address or guessing a name.
+
+### Fixed
+
+- **Bare-IP servers could not be used over gRPC (Drive/Transfer) TLS.**
+  When a server is reached only by its IP (the common internal/air-gapped
+  shape) the generated certificate previously carried only the IP in its
+  Subject/Subject-Alternative-Name. Node/gRPC and Bun refuse to use an IP as
+  a TLS server name (they throw `ERR_INVALID_ARG_VALUE: Setting the TLS
+  ServerName to an IP address is not permitted`), so any `deltix push/pull`
+  failed with `DEPTH_ZERO_SELF_SIGNED_CERT` even after the CA was trusted —
+  the login (REST) worked, the data plane didn't. The certificate generator
+  and `install.sh` now add a real, machine-specific DNS-style name to the SAN
+  of every certificate generated for a bare-IP host: this host's FQDN (or
+  short hostname), which is unique per server and present on every company's
+  box with zero configuration. An operator can still pin a specific name via
+  `TLS_SERVER_NAME_OVERRIDE` when their network has one in mind. The chosen
+  name is persisted in `.tls-state` and printed at cert generation so
+  operators know what to tell their clients.
+
+### Changed
+
+- `scripts/generate-server-tls-cert.ts` now derives the host's DNS name
+  (`node:os` hostname, or an explicit extra SAN) whenever the requested
+  identity is a bare IP, and prints the server-name override clients should
+  use. `scripts/install.sh` passes the detected name to both the HTTP and
+  gRPC certificate generations and records it in the TLS state file.
+
 ## [0.6.13] - 2026-08-28
 
 **In plain terms:** upgrading the server on an existing machine that had TLS
