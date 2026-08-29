@@ -23,6 +23,8 @@ export interface PushPreparationResult {
   username: string;
   stagingPath: string;
   dryRun: boolean;
+  /** Resolved table set from sync-prefs FK closure, if any. */
+  resolvedTables?: string[];
 }
 
 export type OnBeforePush = (params: {
@@ -37,6 +39,7 @@ export type OnPushCommitted = (params: {
   username: string;
   jobId: string;
   checksum: string;
+  resolvedTables?: string[];
 }) => Promise<void>;
 
 export class PushSessionHandler {
@@ -157,6 +160,7 @@ export class PushSessionHandler {
       username: preparation.username,
       jobId,
       checksum,
+      resolvedTables: preparation.resolvedTables,
     }).catch(() => {});
 
     return { jobId, checksum, bytesReceived: this.bytesReceived, dryRun: false };
