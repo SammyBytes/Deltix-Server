@@ -9,6 +9,29 @@ Each entry starts with a **plain-language summary** (what changed, in
 everyday words) before any technical detail — written so someone outside
 engineering can understand what shipped and why it matters.
 
+## [0.6.13] - 2026-08-28
+
+**In plain terms:** upgrading the server on an existing machine that had TLS
+enabled could abort with a "variable unbound" error at the very start of the
+installer, before it even asked you anything — and once it crashed, the
+installation never continued. The installer now tolerates a previous
+configuration that didn't record every TLS detail, and proceeds normally.
+
+### Fixed
+
+- **Installer aborted with `PREV_TLS[hostname]: unbound variable` when a
+  previous TLS configuration was present but didn't record a server
+  hostname.** The upgrade path reads the persisted TLS state written by
+  v0.6.11 and re-offers those paths. Under `set -u`, dereferencing a
+  persisted TLS state key that simply isn't present in the state file
+  (an older state file, or one written before hostname capture) made the
+  whole script exit with an unbound-variable error at line 254, before any
+  prompt. The lookups now use guarded `${PREV_TLS[key]:-}` defaults (the same
+  pattern already used for `mode`), so a missing key is treated as
+  "not recorded" rather than a hard crash. Reproduced the exact failures:
+  the pre-fix script aborts with the same unbound-variable error, and the
+  post-fix script runs to completion with a full unit suite and lint clean.
+
 ## [0.6.12] - 2026-08-28
 
 **In plain terms:** if you left the Admin Web UI open for a while and then

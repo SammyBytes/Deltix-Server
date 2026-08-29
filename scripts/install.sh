@@ -251,9 +251,9 @@ if [ -f "${TLS_STATE_FILE}" ]; then
   if [ -z "${TLS_MODE}" ] || [ "${TLS_MODE}" = "none" ]; then
     TLS_MODE="${PREV_TLS[mode]:-none}"
   fi
-  [ -n "${PREV_TLS[hostname]}" ] && TLS_HOSTNAME="${TLS_HOSTNAME:-${PREV_TLS[hostname]}}"
-  [ -n "${PREV_TLS[cert]}" ] && TLS_CERT_PATH="${TLS_CERT_PATH:-${PREV_TLS[cert]}}"
-  [ -n "${PREV_TLS[key]}" ] && TLS_KEY_PATH="${TLS_KEY_PATH:-${PREV_TLS[key]}}"
+  [ -n "${PREV_TLS[hostname]:-}" ] && TLS_HOSTNAME="${TLS_HOSTNAME:-${PREV_TLS[hostname]}}"
+  [ -n "${PREV_TLS[cert]:-}" ] && TLS_CERT_PATH="${TLS_CERT_PATH:-${PREV_TLS[cert]}}"
+  [ -n "${PREV_TLS[key]:-}" ] && TLS_KEY_PATH="${TLS_KEY_PATH:-${PREV_TLS[key]}}"
 fi
 
 if [ "${UNATTENDED}" != "true" ]; then
