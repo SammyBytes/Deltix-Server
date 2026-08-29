@@ -118,4 +118,17 @@ describe('versioning/RepoProvisioningService', () => {
     const notFound = await service.get('does-not-exist');
     expect(notFound).toBeNull();
   });
+
+  it('isProvisionable mirrors the allow-list without touching the store or CLI', () => {
+    const store = createInMemoryRepoStore();
+    const runDoltInit = mock(async () => {});
+    const service = new RepoProvisioningService(store, runDoltInit, '/data/dolt-repos');
+
+    expect(service.isProvisionable('demo-repo')).toBe(true);
+    expect(service.isProvisionable('Repo_123-test')).toBe(true);
+    expect(service.isProvisionable('org/e2e-smoke-repo')).toBe(false);
+    expect(service.isProvisionable('../escape')).toBe(false);
+    expect(service.isProvisionable('')).toBe(false);
+    expect(runDoltInit).not.toHaveBeenCalled();
+  });
 });

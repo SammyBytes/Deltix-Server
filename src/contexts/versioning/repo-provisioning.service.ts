@@ -67,4 +67,14 @@ export class RepoProvisioningService {
   async list(): Promise<RepoRecord[]> {
     return this.store.list();
   }
+
+  /**
+   * Whether `repoId` could ever be provisioned (passes the same allow-list
+   * `provision()` enforces). Lets callers decide, before doing any
+   * permission checks, whether a push target is a real Deltix repo or just
+   * an arbitrary id from the legacy transfer-only flow.
+   */
+  isProvisionable(repoId: string): boolean {
+    return VALID_REPO_ID.test(repoId);
+  }
 }

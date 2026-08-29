@@ -266,9 +266,14 @@ async function main(): Promise<void> {
       }
     },
     async ({ repo, username, stagingPath, syncOptions }) => {
-      // Auto-creation: if the repo doesn't exist yet, check permission and provision.
+      // Auto-creation (GitHub-style first push): when a push targets a repo
+      // that doesn't exist yet, provision it and make the pusher its admin —
+      // but only for a real Deltix repo id and only if the user holds the
+      // canCreateRepos permission. An id that can never be provisioned (the
+      // legacy NAS-sim flow pushes to arbitrary ids with no Dolt repo behind
+      // them) is left to the backward-compatible no-op path below.
       const existing = await repoProvisioningService.get(repo);
-      if (!existing) {
+      if (!existing && repoProvisioningService.isProvisionable(repo)) {
         if (!(await authService.canUserCreateRepos(username))) {
           throw new PushSessionAbortedError(
             `User "${username}" cannot create repos — ask a global admin to grant canCreateRepos`,
