@@ -632,6 +632,7 @@ export function createVersioningRouter(
         .array(
           z.object({
             name: z.string().min(1).max(128),
+            schema: z.string().min(1),
             data: z.string(),
           }),
         )

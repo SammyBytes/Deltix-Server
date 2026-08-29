@@ -1,9 +1,10 @@
 /**
  * Dolt CLI implementation for importing commits from client pushes (Fase 4b).
- * For each commit: imports table data via SQL INSERT, runs dolt add + commit.
- *
- * Table data is expected as CSV. Each table gets truncated before import
- * to ensure the server state matches the client state exactly.
+ * For each commit, per table: recreate the schema from the client's DDL
+ * (create, or truncate if it already exists), then reload every row from the
+ * CSV. Schema comes as DDL — not inferred from CSV — so primary keys and
+ * column types survive the round trip exactly. Then `dolt add` + `dolt commit`
+ * with the original message and author.
  *
  * All values are passed via argv arrays (OWASP A03 — no shell interpolation).
  */
@@ -26,6 +27,10 @@ function assertSafeTableName(name: string): void {
   }
 }
 
+function sqlLiteral(value: string): string {
+  return `'${value.replace(/'/g, "''")}'`;
+}
+
 export const runDoltCommitImport: RunDoltCommitImport = async ({
   doltPath,
   authorName,
@@ -35,51 +40,55 @@ export const runDoltCommitImport: RunDoltCommitImport = async ({
   const safeAuthor = sanitizeAuthorName(authorName);
   const authorFlag = `${safeAuthor} <${safeAuthor}@deltix.local>`;
 
-  // Import each table's data via dolt sql
   for (const table of tables) {
     assertSafeTableName(table.name);
 
-    // Truncate the table first to match client state
-    const truncate = await $`dolt --data-dir ${doltPath} sql -q ${`TRUNCATE TABLE ${table.name}`}`
-      .quiet()
-      .nothrow();
-    if (truncate.exitCode !== 0) {
-      throw new Error(
-        `dolt sql (truncate ${table.name}) failed: ${truncate.stderr.toString().trim()}`,
-      );
+    // Recreate the schema. `dolt schema export` emits a plain CREATE TABLE, so
+    // on a re-push the table already exists — fall back to TRUNCATE in that
+    // case (the schema is unchanged); any other DDL failure is fatal.
+    const create = await $`dolt --data-dir ${doltPath} sql -q ${table.schema}`.quiet().nothrow();
+    if (create.exitCode !== 0) {
+      if (!create.stderr.toString().toLowerCase().includes('already exists')) {
+        throw new Error(
+          `dolt sql (create ${table.name}) failed: ${create.stderr.toString().trim()}`,
+        );
+      }
+      const truncate = await $`dolt --data-dir ${doltPath} sql -q ${`TRUNCATE TABLE ${table.name}`}`
+        .quiet()
+        .nothrow();
+      if (truncate.exitCode !== 0) {
+        throw new Error(
+          `dolt sql (truncate ${table.name}) failed: ${truncate.stderr.toString().trim()}`,
+        );
+      }
     }
 
-    // Import CSV data via LOAD DATA or individual INSERTs
-    // Using dolt table import for CSV data
-    const importResult =
-      await $`dolt --data-dir ${doltPath} table import -c -f ${table.name} ${`/dev/stdin`}`
-        .quiet()
-        .nothrow()
-        .stdin(table.data);
-
-    // Fallback: if table import doesn't work with stdin, use SQL INSERTs
-    if (importResult.exitCode !== 0) {
-      // Parse CSV and create INSERT statements
-      const lines = table.data.trim().split('\n');
-      if (lines.length > 1) {
-        // Skip header row, insert data rows
-        const columns = parseCsvLine(lines[0] ?? '');
-        for (let i = 1; i < lines.length; i++) {
-          const values = parseCsvLine(lines[i] ?? '');
-          if (values.length !== columns.length) {
-            continue;
-          }
-          const escapedValues = values.map((v) => `'${v.replace(/'/g, "''")}'`);
-          const insertSql = `INSERT INTO ${table.name} (${columns.join(', ')}) VALUES (${escapedValues.join(', ')})`;
-          const insertResult = await $`dolt --data-dir ${doltPath} sql -q ${insertSql}`
-            .quiet()
-            .nothrow();
-          if (insertResult.exitCode !== 0) {
-            throw new Error(
-              `dolt sql (insert into ${table.name}) failed: ${insertResult.stderr.toString().trim()}`,
-            );
-          }
-        }
+    // Reload rows from the CSV (first line is the header).
+    const lines = table.data
+      .replace(/\r/g, '')
+      .split('\n')
+      .filter((line) => line.length > 0);
+    if (lines.length <= 1) {
+      continue; // header only (or empty) → table exists, no rows to insert
+    }
+    const columns = parseCsvLine(lines[0] ?? '');
+    for (let i = 1; i < lines.length; i++) {
+      const values = parseCsvLine(lines[i] ?? '');
+      if (values.length !== columns.length) {
+        throw new Error(
+          `dolt import ${table.name}: row ${i} has ${values.length} cols, expected ${columns.length}`,
+        );
+      }
+      const cols = columns.map((c) => `\`${c}\``).join(', ');
+      const vals = values.map(sqlLiteral).join(', ');
+      const insert =
+        await $`dolt --data-dir ${doltPath} sql -q ${`INSERT INTO ${table.name} (${cols}) VALUES (${vals})`}`
+          .quiet()
+          .nothrow();
+      if (insert.exitCode !== 0) {
+        throw new Error(
+          `dolt sql (insert into ${table.name}) failed: ${insert.stderr.toString().trim()}`,
+        );
       }
     }
   }

@@ -10,6 +10,9 @@ import type { RepoStore } from './repo-store';
 
 export interface ImportedTable {
   name: string;
+  /** CREATE TABLE DDL (from `dolt schema export`) so the table — and its
+   * primary key, which a bare CSV cannot carry — is recreated faithfully. */
+  schema: string;
   data: string;
 }
 

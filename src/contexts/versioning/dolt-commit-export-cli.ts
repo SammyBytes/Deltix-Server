@@ -83,6 +83,14 @@ async function tableData(doltPath: string, table: string, commitHash: string): P
   return r.stdout;
 }
 
+async function tableSchema(doltPath: string, table: string): Promise<string> {
+  const r = await runDolt(['--data-dir', doltPath, 'schema', 'export', table]);
+  if (r.exitCode !== 0) {
+    throw new Error(`dolt schema export of ${table} failed: ${r.stderr.trim()}`);
+  }
+  return r.stdout;
+}
+
 export const runDoltCommitExport: RunDoltCommitExport = async function* ({
   doltPath,
   branch,
@@ -107,7 +115,11 @@ export const runDoltCommitExport: RunDoltCommitExport = async function* ({
     }
     const exported = [];
     for (const table of tables) {
-      exported.push({ name: table, data: await tableData(doltPath, table, hash) });
+      exported.push({
+        name: table,
+        schema: await tableSchema(doltPath, table),
+        data: await tableData(doltPath, table, hash),
+      });
     }
     const commit: ExportedCommit = {
       hash,
