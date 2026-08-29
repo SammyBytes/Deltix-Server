@@ -40,6 +40,7 @@ describe('auth/auth.router (integration, real HTTP requests via Hono.fetch)', ()
       active: true,
       lastLoginAt: null,
       isGlobalAdmin: false,
+      canCreateRepos: true,
     });
 
     service = new AuthService(

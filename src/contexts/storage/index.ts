@@ -21,5 +21,6 @@ export {
 export { NasSyncService } from './nas-sync.service';
 export { NasSyncWorker } from './nas-sync.worker';
 export type { OnBeforePush, OnPushCommitted } from './push-session-handler';
+export { PushSessionAbortedError } from './push-session-handler';
 export { createStorageRouter } from './storage.router';
 export type { TransferJob, TransferJobStatus } from './types';

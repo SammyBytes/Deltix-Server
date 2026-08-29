@@ -30,6 +30,7 @@ describe('auth/libsql-user-store (integration, real libSQL file)', () => {
       active: true,
       lastLoginAt: null,
       isGlobalAdmin: false,
+      canCreateRepos: true,
     });
     await store.updateLastLogin('alice', 2000);
     await store.setActive('alice', false);
