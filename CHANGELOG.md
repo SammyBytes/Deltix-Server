@@ -9,6 +9,79 @@ Each entry starts with a **plain-language summary** (what changed, in
 everyday words) before any technical detail — written so someone outside
 engineering can understand what shipped and why it matters.
 
+## [0.7.0] - 2026-08-29
+
+**In plain terms:** three big steps toward a "Git for databases" workflow.
+(1) When you push only some of your tables, the server now commits exactly
+those tables — including any tables they depend on — instead of everything in
+the database. (2) The company owner can now decide **who is allowed to create
+new repositories**: a new per-user permission controls it, and the first time
+someone with that permission pushes to a repository that doesn't exist yet, the
+server creates it automatically and makes them its owner (like GitHub creating
+a repo on first push). (3) A new REST endpoint accepts structured commits
+directly, so a client can send "here are my commits and their table data"
+instead of uploading raw files. Without the permission, a push to an unknown
+repository is rejected and the user's data simply stays local.
+
+### Added
+
+- **`POST /api/v1/versioning/repos/:repoId/push-commits` (Fase 4b).** Accepts
+  a JSON body `{ commits: [{ message, author, tables: [{ name, data }] }] }`,
+  verifies the caller holds `writer`/`admin` on the repo (403 otherwise),
+  imports each commit's CSV table data (truncate + insert), and creates a real
+  Dolt commit per entry with the original message and author. Implemented via
+  the new `CommitImportService` + `dolt-commit-import-cli.ts`.
+- **`canCreateRepos` per-user flag (Fase 4a).** Global admins grant/revoke it
+  via `POST`/`DELETE /api/v1/auth/users/:username/can-create-repos`; it is
+  returned by login/refresh and listed in `GET /users`. Global admins always
+  bypass the check.
+- **Auto-creation of repos on first push (Fase 4a).** In the gRPC `onBeforePush`
+  hook, a push to a repo that doesn't exist yet provisions it (Dolt backend +
+  role grant to the pusher) when the user holds `canCreateRepos`; otherwise the
+  push is aborted with a clear message and nothing is staged.
+
+### Changed
+
+- **Push commits honor the sync-pref table allow-list (Fase 3c).** The
+  FK-closed `resolvedTables` set computed during sync validation now flows
+  through `onBeforePush` → `onPushCommitted` → `CommitService.recordPush` →
+  `runDoltCommit`, which stages exactly those tables (`dolt add <tables>`)
+  instead of `dolt add -A`. With no sync prefs configured, behavior is
+  unchanged (full working tree).
+- **Dry-run previews no longer fail closed (Fase 3c).**
+  `SyncPreferenceService.preview()` (and therefore
+  `POST /repos/:repoId/sync-preferences/dry-run`) returns the full plan —
+  `resolvedTables` plus `autoIncludedTables` — instead of throwing 409 when a
+  requested subset pulls in FK dependencies. Persisting (`PUT`) and real pushes
+  still reject an incomplete closure; the point of a dry run is to *show* what
+  would be auto-included.
+
+### Security
+
+- **Repo creation is permission-gated (Fase 4a).** `POST /repos` returns 403
+  unless the caller is a global admin or holds `canCreateRepos`. Combined with
+  the push path, creating repositories is now an explicitly-granted capability,
+  not something any authenticated user can do.
+- **push-commits enforces repo membership (Fase 4b).** The endpoint checks the
+  caller's per-repo role (`writer`/`admin`) before importing anything; table
+  names are validated against a strict identifier regex and author names are
+  sanitized before reaching the Dolt CLI (OWASP A03).
+
+### Removed
+
+- **Dead code (Fase 3c):** `LibsqlSyncPreferenceStore` and the
+  `SyncPreferenceStore` interface — sync preferences have been persisted
+  through `LibsqlRepoStore` since Fase 5.8 and nothing referenced the old store.
+
+### Tests
+
+- 271 unit + 117 integration tests pass. New: `CommitImportService` suite
+  (import, multi-commit, skip-empty, unknown-repo, empty-batch), 9
+  `canCreateRepos` auth-service tests (login/refresh flag, toggle, admin
+  bypass, fail-closed for unknown users), and updated dry-run tests asserting
+  the resolved plan (transitive FK closure `orders → customers → regions`)
+  instead of a 409 throw.
+
 ## [0.6.16] - 2026-08-29
 
 **In plain terms:** the CLI trusts one certificate and uses it to validate
