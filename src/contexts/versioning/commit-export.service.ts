@@ -15,6 +15,9 @@ import type { RepoStore } from './repo-store';
 
 export interface ExportedTable {
   name: string;
+  /** CREATE TABLE DDL so the client can recreate the table (with its primary
+   * key) faithfully — a bare CSV cannot carry schema. */
+  schema: string;
   data: string;
 }
 
