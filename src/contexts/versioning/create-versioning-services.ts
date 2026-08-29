@@ -1,6 +1,7 @@
 import type { Env } from '../../shared/env';
 import { BranchService } from './branch.service';
 import { CommitService } from './commit.service';
+import { CommitExportService } from './commit-export.service';
 import { CommitImportService } from './commit-import.service';
 import { DiffService } from './diff.service';
 import {
@@ -12,6 +13,7 @@ import {
 } from './dolt-branch-cli';
 import { runDoltInit } from './dolt-cli';
 import { runDoltCommit } from './dolt-commit-cli';
+import { runDoltBranchHead, runDoltCommitExport, runDoltListRefs } from './dolt-commit-export-cli';
 import { runDoltCommitImport } from './dolt-commit-import-cli';
 import { runDoltReadDiff } from './dolt-diff-cli';
 import { readForeignKeyEdges } from './dolt-foreign-key-reader';
@@ -33,6 +35,7 @@ export interface VersioningServices {
   repoProvisioningService: RepoProvisioningService;
   commitService: CommitService;
   commitImportService: CommitImportService;
+  commitExportService: CommitExportService;
   branchService: BranchService;
   mergeService: MergeService;
   logService: LogService;
@@ -51,6 +54,12 @@ export async function createVersioningServices(env: Env): Promise<VersioningServ
     ),
     commitService: new CommitService(store, runDoltCommit),
     commitImportService: new CommitImportService(store, runDoltCommitImport),
+    commitExportService: new CommitExportService(
+      store,
+      runDoltCommitExport,
+      runDoltBranchHead,
+      runDoltListRefs,
+    ),
     branchService: new BranchService(store, {
       runDoltListBranches,
       runDoltCurrentBranch,
