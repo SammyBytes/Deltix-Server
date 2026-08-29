@@ -9,6 +9,50 @@ Each entry starts with a **plain-language summary** (what changed, in
 everyday words) before any technical detail — written so someone outside
 engineering can understand what shipped and why it matters.
 
+## [0.8.0] - 2026-08-29
+
+**In plain terms:** this release adds the *other half* of the Git-like loop: a
+way for the server to hand commits back to a client so `deltix pull` works. A
+client can now ask the server "which commits am I missing?" and receive them as
+a stream, one per line, ready to apply locally. It also fixes a real bug in the
+push path: pushing a brand-new table used to fail because the server tried to
+empty a table that didn't exist yet — now each table is recreated faithfully
+from its definition (including its primary key), so first pushes land correctly.
+
+### Added
+
+- **`GET /api/v1/versioning/repos/:repoId/pull-commits?branch=&from=` (Fase 5.9).**
+  Streams the commits on a branch that a client hasn't seen yet as
+  `application/x-ndjson` (one commit per line: `{hash, message, author,
+  tables:[{name, schema, data}]}`), with the branch head in an
+  `X-Deltix-Server-Head` response header. Reader role enforced per repo. Served
+  as a true stream so a first clone of a large repo stays flat in memory.
+  Implemented via the new `CommitExportService` + `dolt-commit-export-cli.ts`
+  (enumerates `dolt_log AS OF <branch>`, changed tables via
+  `dolt diff --name-only <hash>^..<hash>`, data via `SELECT * FROM t AS OF
+  <hash>`).
+- **`GET /api/v1/versioning/repos/:repoId/refs` (Fase 5.9).** Returns the
+  repo's `branch -> head` map so a client can negotiate what to fetch (like
+  `git ls-remote`).
+
+### Fixed
+
+- **Pushing a new table failed (Fase 5.9).** `push-commits` imported each table
+  with `TRUNCATE TABLE` before loading, which errors when the table doesn't
+  exist yet — i.e. the normal first push that *creates* a table. The commit
+  payload now carries each table's `CREATE TABLE` DDL (`dolt schema export`);
+  import creates the table from that DDL (falling back to `TRUNCATE` on a
+  re-push) and reloads rows, so primary keys and column types survive the round
+  trip. A bare CSV cannot carry a primary key, which is why the schema ships
+  alongside the data.
+
+### Tests
+
+- 277 unit + integration tests pass. New: `CommitExportService` unit suite
+  (fakes) and a real-Dolt integration test for the export endpoints (refs,
+  NDJSON streaming with the head header, `from` filtering, 401 on
+  unauthenticated).
+
 ## [0.7.0] - 2026-08-29
 
 **In plain terms:** three big steps toward a "Git for databases" workflow.
