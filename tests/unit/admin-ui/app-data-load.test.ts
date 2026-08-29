@@ -64,6 +64,7 @@ function loadUiHarness(
 ) {
   const calls: string[] = [];
   const intervals: Array<{ fn: () => void; delay: number }> = [];
+  const timeouts: Array<{ fn: () => void; delay: number; token: number }> = [];
   const elements = new Map<string, ReturnType<typeof makeElement>>();
 
   const ids = [
@@ -183,14 +184,15 @@ function loadUiHarness(
       json: async () => body,
       text: async () => JSON.stringify(body),
     });
-    const deny = { ok: false, status: 401, json: async () => ({}), text: async () => 'denied' };
     if (s.includes('/api/v1/auth/login'))
       return ok({
         accessToken: 'tok',
         username: 'hemiblade',
         isGlobalAdmin: options?.isGlobalAdmin ?? true,
+        expiresInSeconds: 900,
       });
-    if (s.includes('/api/v1/auth/refresh')) return deny;
+    if (s.includes('/api/v1/auth/refresh'))
+      return ok({ accessToken: 'tok-refreshed', username: 'hemiblade', expiresInSeconds: 900 });
     if (s.includes('/api/v1/auth/logout')) return ok({});
     if (s.includes('/api/v1/auth/users')) return ok({ users: [] });
     if (s.includes('/api/v1/addons/trust')) return ok({ addons: [] });
@@ -204,18 +206,31 @@ function loadUiHarness(
     return intervalSeq++;
   };
 
+  let timeoutSeq = 1;
+  const setTimeoutStub = (fn: unknown, delay: number) => {
+    const token = timeoutSeq++;
+    timeouts.push({ fn: fn as () => void, delay, token });
+    return token;
+  };
+  const clearTimeoutStub = (token: number) => {
+    const idx = timeouts.findIndex((t) => t.token === token);
+    if (idx >= 0) {
+      timeouts.splice(idx, 1);
+    }
+  };
+
   const context: Record<string, unknown> = {
     console,
     fetch: fetchMock,
-    setTimeout,
+    setTimeout: setTimeoutStub,
     queueMicrotask,
     localStorage: { getItem: () => null, setItem: () => {} },
     URL,
     document,
   };
   context.window = {
-    setTimeout,
-    clearTimeout,
+    setTimeout: setTimeoutStub,
+    clearTimeout: clearTimeoutStub,
     setInterval: setIntervalStub,
     clearInterval: () => {},
     addEventListener: () => {},
@@ -231,6 +246,7 @@ function loadUiHarness(
   return {
     calls,
     intervals,
+    timeouts,
     loginForm: context.__uiForm as Parameters<typeof makeElement>[0] & {
       _listeners: Record<string, unknown>;
     },
@@ -302,5 +318,34 @@ describe('admin-ui/app.js initial data load after login', () => {
     expect(harness.getEl('users-nav-link')?.classList.contains('hidden')).toBe(false);
     expect(harness.getEl('addons-nav-link')?.classList.contains('hidden')).toBe(false);
     expect(harness.getEl('not-admin-notice')?.classList.contains('hidden')).toBe(true);
+  });
+
+  it('renews the access token before it expires so management actions keep working', async () => {
+    const harness = loadUiHarness(APP_JS, true);
+
+    const submit = harness.loginForm._listeners.submit as () => Promise<void>;
+    await submit.call(harness.loginForm, { preventDefault() {} });
+
+    // After login a renewal timeout must be scheduled to refresh the token.
+    const renewalTimer = harness.timeouts.find((t) => t.delay >= 10_000);
+    expect(renewalTimer).toBeDefined();
+
+    const refreshCallsBefore = harness.calls.filter((c) =>
+      c.includes('/api/v1/auth/refresh'),
+    ).length;
+    renewalTimer?.fn();
+    // flush the async refresh chain (fetch -> json -> schedule)
+    for (let i = 0; i < 10; i++) await Promise.resolve();
+
+    const refreshCallsAfter = harness.calls.filter((c) =>
+      c.includes('/api/v1/auth/refresh'),
+    ).length;
+    expect(refreshCallsAfter).toBeGreaterThan(refreshCallsBefore);
+
+    // A fresh renewal timer is scheduled after each successful refresh.
+    const rescheduled = harness.timeouts.find(
+      (t) => t.delay >= 10_000 && t.token !== renewalTimer?.token,
+    );
+    expect(rescheduled).toBeDefined();
   });
 });

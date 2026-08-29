@@ -347,6 +347,10 @@ function showSession(username, isGlobalAdmin) {
 
   // Keep the active-session / dashboard tiles live while the session is open.
   startLiveRefresh();
+
+  // Renew the access token before it lapses so authenticated management
+  // actions keep working for as long as the operator stays signed in.
+  scheduleTokenRenewal();
 }
 
 // Wraps cosmetic/side-effect work (onboarding tours, etc.) so a runtime error
@@ -395,11 +399,79 @@ document.addEventListener('visibilitychange', () => {
 
 // ==================== LOGIN / LOGOUT ====================
 
+// ---- Session token renewal ----
+// The server issues an access token that expires after ~15 minutes, and
+// keeps a sliding session (~2 minutes of activity) via an HttpOnly cookie.
+// If the frontend never renews it, every authenticated call (creating,
+// deleting, revoking users, granting repo roles, etc.) starts returning 401
+// roughly 15 minutes after login — the admin is left unable to do anything
+// ("I'm the global admin and nothing works") until they log out and back in.
+//
+// We therefore renew the access token proactively while a session is open:
+// a trailing refresh timer calls POST /refresh (same-origin, sends the
+// cookie), which mints a fresh access token AND slides the session window.
+// The renewal runs well before the token expires and more often than the
+// sliding-session timeout so the admin session never silently dies.
+
+let tokenRefreshTimer = null;
+const SLIDING_SESSION_SAFETY_MS = 30_000;
+
+async function refreshAccessToken() {
+  if (!currentUsername) return null;
+  try {
+    const res = await fetch('/api/v1/auth/refresh', { method: 'POST', credentials: 'include' });
+    if (!res.ok) return null;
+    const data = await res.json();
+    if (typeof data.accessToken === 'string' && data.accessToken) {
+      accessToken = data.accessToken;
+      scheduleTokenRenewal(data.expiresInSeconds);
+      return data.accessToken;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function scheduleTokenRenewal(expiresInSeconds) {
+  if (tokenRefreshTimer) {
+    window.clearTimeout(tokenRefreshTimer);
+    tokenRefreshTimer = null;
+  }
+  // Default to renew ~1 minute before the access token would expire, but
+  // never later than the sliding-session safety margin (always refresh
+  // before the cookie-based session would lapse).
+  const accessTtlMs = Number.isFinite(expiresInSeconds) && expiresInSeconds > 0
+    ? expiresInSeconds * 1000
+    : 15 * 60 * 1000;
+  const delayMs = Math.min(
+    Math.max(accessTtlMs - 60_000, 10_000),
+    Math.max(SLIDING_SESSION_SAFETY_MS, 60_000),
+  );
+  tokenRefreshTimer = window.setTimeout(async () => {
+    const renewed = await refreshAccessToken();
+    // If renewal failed (e.g. network blip), retry shortly rather than
+    // letting the session lapse silently.
+    if (!renewed && currentUsername) {
+      tokenRefreshTimer = window.setTimeout(refreshAccessToken, 30_000);
+    }
+  }, delayMs);
+}
+
+function stopTokenRenewal() {
+  if (tokenRefreshTimer) {
+    window.clearTimeout(tokenRefreshTimer);
+    tokenRefreshTimer = null;
+  }
+}
+
+
 function showForm() {
   currentUsername = null;
   currentIsGlobalAdmin = false;
   accessToken = null;
   stopLiveRefresh();
+  stopTokenRenewal();
   withViewTransition(() => {
     if (sessionPanel) sessionPanel.classList.add('hidden');
     if (loginView) loginView.classList.remove('hidden');

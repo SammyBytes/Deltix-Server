@@ -9,6 +9,42 @@ Each entry starts with a **plain-language summary** (what changed, in
 everyday words) before any technical detail — written so someone outside
 engineering can understand what shipped and why it matters.
 
+## [0.6.12] - 2026-08-28
+
+**In plain terms:** if you left the Admin Web UI open for a while and then
+tried to manage users — create, delete, revoke a role, or deactivate an
+account — nothing worked, even though you were the global administrator. The
+buttons weren't broken: the server's login "key" expires automatically after
+about 15 minutes, and the admin page was never renewing it on its own. After
+that, every request the page made was rejected as no-longer-authorized. The
+admin page now quietly renews that key in the background before it expires, so
+your session keeps working as long as you're signed in — no more mystery
+"everything stopped working" a quarter of an hour after logging in.
+
+### Fixed
+
+- **Admin session silently died ~15 minutes after login, breaking every
+  management action**: the server issues an access token that expires after
+  `accessTokenTtlSeconds` (default 900s / 15 min), while the frontend obtained
+  it once at login/refresh and never renewed it during the session. Once the
+  token lapsed, every authenticated call — `POST/DELETE users`, repo role
+  grant/revoke, deactivate, global-admin toggle, etc. — returned 401, so a
+  logged-in global admin was suddenly "unable to do anything" until they
+  logged out and back in. `showSession()` now arms a `scheduleTokenRenewal()`
+  timer that calls `POST /api/v1/auth/refresh` well before the access token
+  expires (and more often than the sliding session timeout), minting a fresh
+  token and sliding the HttpOnly session so the operator stays authorized
+  indefinitely while signed in. Renewal is stopped on logout (`showForm`),
+  and if a refresh fails transiently it retries shortly after.
+
+### Tests
+
+- Extended `tests/unit/admin-ui/app-data-load.test.ts`: after login a renewal
+  timeout is scheduled; firing it issues `POST /api/v1/auth/refresh` and
+  schedules a fresh renewal timer. Against v0.6.10 (no renewer) this test
+  FAILS — no renewal timer exists — and against this release it PASSES. Suite:
+  265 pass / 0 fail; lint clean.
+
 ## [0.6.11] - 2026-08-28
 
 **In plain terms:** upgrading the server no longer makes you re-type your
