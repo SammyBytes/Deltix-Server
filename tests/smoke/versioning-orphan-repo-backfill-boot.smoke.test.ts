@@ -221,15 +221,19 @@ describe('orphaned repo admin backfill boot smoke test (real subprocess, real HT
     expect(res.status).toBe(200);
   });
 
-  it('does not grant the global admin implicit data access to an already-governed repo they were never assigned a role on', async () => {
+  it('grants the global admin implicit data access to an already-governed repo they were never assigned a role on', async () => {
     const res = await fetch(
       `http://127.0.0.1:${httpPort}/api/v1/versioning/repos/already-governed/branches`,
       { headers: { authorization: `Bearer ${accessToken}` } },
     );
 
-    // Reading repo *data* (branches, commits, diffs, etc.) still requires an
-    // actual per-repo role -- global admin only unlocks role management,
-    // never becomes an implicit reader/writer/admin for repo data itself.
-    expect(res.status).toBe(403);
+    // Reading repo *data* (branches, commits, diffs, etc.) is implicit for
+    // any user with isGlobalAdmin=true. Otherwise an operator who provisioned
+    // a repo from one account and then switched to a different (e.g.
+    // human-named) account for daily use would be locked out of their own
+    // data. Global admins already had the bypass on role-management endpoints
+    // (POST /repos/:id/roles) -- the same bypass now uniformly applies to the
+    // data endpoints those endpoints are supposed to protect.
+    expect(res.status).toBe(200);
   });
 });
