@@ -7,6 +7,7 @@ import { InvalidRepoRoleError, RepoRoleAssignmentNotFoundError, UserNotFoundErro
 import type { BranchService } from './branch.service';
 import type { CommitExportService } from './commit-export.service';
 import type { CommitImportService } from './commit-import.service';
+import { CommitImportError } from './commit-import.service';
 import type { DiffService } from './diff.service';
 import {
   BranchAlreadyExistsError,
