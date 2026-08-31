@@ -8,6 +8,10 @@
  *
  * All values are passed via argv arrays (OWASP A03 — no shell interpolation).
  */
+
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { $ } from 'bun';
 import type { RunDoltCommitImport } from './commit-import.service';
 
@@ -25,10 +29,6 @@ function assertSafeTableName(name: string): void {
   if (!SAFE_TABLE_RE.test(name)) {
     throw new Error(`Refusing to import: table name "${name}" has an unexpected shape`);
   }
-}
-
-function sqlLiteral(value: string): string {
-  return `'${value.replace(/'/g, "''")}'`;
 }
 
 export const runDoltCommitImport: RunDoltCommitImport = async ({
@@ -71,25 +71,28 @@ export const runDoltCommitImport: RunDoltCommitImport = async ({
     if (lines.length <= 1) {
       continue; // header only (or empty) → table exists, no rows to insert
     }
-    const columns = parseCsvLine(lines[0] ?? '');
-    for (let i = 1; i < lines.length; i++) {
-      const values = parseCsvLine(lines[i] ?? '');
-      if (values.length !== columns.length) {
+    // Use `dolt table import -r` instead of per-row INSERT statements. It
+    // parses the CSV the same way Dolt wrote it (so type coercion is exact:
+    // an empty string lands as NULL into a DATETIME column, which an INSERT
+    // statement rejects with "Incorrect datetime value: ''"). It's also
+    // dramatically faster for tables with thousands of rows — a single
+    // batched load instead of O(rows) subprocess invocations. The CSV
+    // header is already produced by the client in the right column order,
+    // so we just write the bytes back to a temp file and point dolt at it.
+    const importDir = await mkdtemp(join(tmpdir(), 'deltix-server-import-'));
+    const importFile = join(importDir, `${table.name}.csv`);
+    try {
+      await writeFile(importFile, table.data);
+      const imp = await $`dolt --data-dir ${doltPath} table import -r ${table.name} ${importFile}`
+        .quiet()
+        .nothrow();
+      if (imp.exitCode !== 0) {
         throw new Error(
-          `dolt import ${table.name}: row ${i} has ${values.length} cols, expected ${columns.length}`,
+          `dolt table import (${table.name}) failed: ${imp.stderr.toString().trim() || imp.stdout.toString().trim()}`,
         );
       }
-      const cols = columns.map((c) => `\`${c}\``).join(', ');
-      const vals = values.map(sqlLiteral).join(', ');
-      const insert =
-        await $`dolt --data-dir ${doltPath} sql -q ${`INSERT INTO ${table.name} (${cols}) VALUES (${vals})`}`
-          .quiet()
-          .nothrow();
-      if (insert.exitCode !== 0) {
-        throw new Error(
-          `dolt sql (insert into ${table.name}) failed: ${insert.stderr.toString().trim()}`,
-        );
-      }
+    } finally {
+      await rm(importDir, { recursive: true, force: true }).catch(() => {});
     }
   }
 
@@ -124,39 +127,3 @@ export const runDoltCommitImport: RunDoltCommitImport = async ({
 
   return commitHash;
 };
-
-/**
- * Parse a single CSV line, handling quoted fields.
- */
-function parseCsvLine(line: string): string[] {
-  const result: string[] = [];
-  let current = '';
-  let inQuotes = false;
-
-  for (let i = 0; i < line.length; i++) {
-    const char = line[i] ?? '';
-    if (inQuotes) {
-      if (char === '"') {
-        if (i + 1 < line.length && line[i + 1] === '"') {
-          current += '"';
-          i++;
-        } else {
-          inQuotes = false;
-        }
-      } else {
-        current += char;
-      }
-    } else {
-      if (char === '"') {
-        inQuotes = true;
-      } else if (char === ',') {
-        result.push(current);
-        current = '';
-      } else {
-        current += char;
-      }
-    }
-  }
-  result.push(current);
-  return result;
-}
