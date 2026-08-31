@@ -9,6 +9,25 @@ Each entry starts with a **plain-language summary** (what changed, in
 everyday words) before any technical detail — written so someone outside
 engineering can understand what shipped and why it matters.
 
+## [0.8.6] - 2026-08-31
+
+**In plain terms:** the refresh-token session lifetime now defaults to
+**7 days** instead of 2 hours. Combined with the v0.7.10 access-token
+auto-refresh, operators can leave for a long weekend and still be
+logged in when they come back.
+
+### Changed
+
+- **`DELTIX_SESSION_TTL_SECONDS` default raised from 120 (2 h) to
+  604800 (7 d).** This is the sliding-window inactivity window for the
+  refresh token. Every `/refresh` call (which the CLI does every time
+  it needs an access token) slides the window out to 7 days from that
+  point, so an active operator effectively stays logged in forever.
+  Inactive operators still get booted after 7 days, which matches the
+  realistic security-vs-convenience tradeoff for a CLI tool.
+  Override via the env var to dial it back for higher-security
+  installations.
+
 ## [0.8.5] - 2026-08-31
 
 **In plain terms:** `deltix push` no longer crashes the server when the
