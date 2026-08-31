@@ -48,7 +48,18 @@ const envSchema = z
     DELTIX_BOOTSTRAP_ADMIN_PASSWORD: z.string().min(1).optional(),
     DELTIX_SESSION_DB_PATH: z.string().min(1, 'DELTIX_SESSION_DB_PATH is required'),
     DELTIX_ACCESS_TOKEN_TTL_SECONDS: z.coerce.number().int().positive().default(900),
-    DELTIX_SESSION_TTL_SECONDS: z.coerce.number().int().positive().default(120),
+    DELTIX_SESSION_TTL_SECONDS: z.coerce
+      .number()
+      .int()
+      .positive()
+      // Sliding-window session lifetime in seconds. With the default 15-minute
+      // access-token TTL the CLI auto-refreshes tokens every call (see v0.7.10),
+      // so the refresh-token session only needs to stay alive as long as the
+      // operator wants to keep their login. 7 days covers a long weekend; the
+      // window slides on every keepAlive so active operators never lose
+      // session, and any /refresh call extends it back out to 7 days from
+      // that point. Set lower for higher-security environments.
+      .default(7 * 24 * 60 * 60),
     DELTIX_CORS_ALLOWED_ORIGINS: z
       .string()
       .default('')
