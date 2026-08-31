@@ -9,6 +9,23 @@ Each entry starts with a **plain-language summary** (what changed, in
 everyday words) before any technical detail — written so someone outside
 engineering can understand what shipped and why it matters.
 
+## [0.8.5] - 2026-08-31
+
+**In plain terms:** `deltix push` no longer crashes the server when the
+source DB had rows with empty strings inside DATETIME / DATE / NUMERIC
+columns (a common artifact of MySQL running with permissive sql_mode).
+
+### Fixed
+
+- **Push crashed the server with `Incorrect datetime value: ''`** when a
+  row had an empty string in a typed column. The server was building
+  per-row `INSERT INTO ... VALUES (...)` statements, so any empty string
+  landed in the SQL literally — and Dolt rejects `''` for non-string
+  column types. Switched the row-loading step to `dolt table import -r`
+  (the same command the client uses locally), which uses Dolt's own CSV
+  parser with proper type coercion. Also dramatically faster for tables
+  with thousands of rows — one subprocess per table instead of one per row.
+
 ## [0.8.4] - 2026-08-31
 
 **In plain terms:** `deltix push` returned 500 on every push because

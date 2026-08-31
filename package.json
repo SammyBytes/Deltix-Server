@@ -1,6 +1,6 @@
 {
   "name": "deltix-server",
-  "version": "0.8.4",
+  "version": "0.8.5",
   "private": true,
   "license": "BUSL-1.1",
   "type": "module",
