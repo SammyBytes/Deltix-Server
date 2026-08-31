@@ -9,6 +9,46 @@ Each entry starts with a **plain-language summary** (what changed, in
 everyday words) before any technical detail — written so someone outside
 engineering can understand what shipped and why it matters.
 
+## [0.8.2] - 2026-08-31
+
+**In plain terms:** `deltix repo create` (and any operation that internally
+calls `dolt init` for a freshly-provisioned repo) used to fail with a
+generic 500 on every install, hiding the real cause: the systemd service
+user had no Dolt identity configured, so every `dolt init` exited with
+"empty ident name not allowed". The error is now reported back to the
+client verbatim, AND the installer always sets up the service user's
+identity (not just on a brand-new install, and not just for root).
+
+### Fixed
+
+- **`POST /api/v1/versioning/repos` returned a generic `Failed to
+  provision repo` 500** when the underlying `dolt init` exited non-zero,
+  forcing operators to dig through `journalctl` to find the real cause
+  (dolt missing from PATH, permissions, identity, etc.). The router now
+  returns the underlying `err.message` instead, so the same request that
+  used to say only `Failed to provision repo` will now say
+  `Failed to provision Dolt repo for "X": dolt init exited with code 1:
+  <stderr>`. Server-side log line unchanged (`logger.error({ err }, ...)`).
+
+- **`scripts/install.sh` did not configure a Dolt identity for the
+  systemd service user.** Two compounding mistakes: the
+  `dolt config --global` calls only ran inside the first-install block
+  (`if [ ! -f "${ENV_FILE}" ]`), so reinstall/upgrade paths never
+  re-asserted the identity; AND they ran as root (install.sh's UID), so
+  the identity landed in `/root/.doltconfig` instead of
+  `/var/lib/deltix/.doltconfig` where the service actually looks.
+  Fix: a new `ensure_dolt_identity_for_service_user()` function runs
+  after the data-dir chown on every install, as
+  `sudo -u "${SERVICE_USER}" -H dolt config --global --add ...`. Idempotent.
+  The in-if-block root identity config (for the one-time `dolt init` of
+  the anti-tamper license log) is kept as-is, with the license-log dir
+  chowned to the service user first so the next `dolt init` runs with
+  the right ownership.
+
+### Tests
+
+- 277 unit tests pass; lint clean.
+
 ## [0.8.1] - 2026-08-29
 
 **In plain terms:** the Admin UI now lets an administrator decide, per person,

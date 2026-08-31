@@ -375,6 +375,33 @@ chmod 750 "${LOG_DIR}"
 chown -R "${SERVICE_USER}:${SERVICE_GROUP}" "${DATA_DIR}" "${CONFIG_DIR}" "${LOG_DIR}"
 
 # ------------------------------------------------------------------------------
+# Ensure the service user has a global Dolt identity.
+#
+# Why this lives outside the first-install block below: every `dolt init`
+# the server runs (most importantly `RepoProvisioningService` when an operator
+# creates a repo through the API) refuses to proceed without a configured
+# `user.name`/`user.email` and exits 1 with "empty ident name not allowed".
+# That surfaced as a generic 500 "Failed to provision repo" on the client.
+#
+# Two earlier mistakes combined to produce the bug:
+#   1. The two `dolt config --global` calls lived INSIDE the
+#      `if [ ! -f "${ENV_FILE}" ]` block, so they only ran on first install
+#      — reinstall/upgrade paths never re-asserted the identity.
+#   2. They ran as root (install.sh's UID), so the identity landed in
+#      /root/.doltconfig, NOT in /var/lib/deltix/.doltconfig where the
+#      systemd service actually looks for it (it runs as the service user).
+#
+# Run as the service user with `-H` so HOME is forced to /var/lib/deltix;
+# `dolt config --global --add` is idempotent so it's safe on every run.
+# ------------------------------------------------------------------------------
+ensure_dolt_identity_for_service_user() {
+  local as_user="${SERVICE_USER}"
+  sudo -u "${as_user}" -H dolt config --global --add user.name deltix-server 2>/dev/null || true
+  sudo -u "${as_user}" -H dolt config --global --add user.email deltix-server@localhost 2>/dev/null || true
+}
+ensure_dolt_identity_for_service_user
+
+# ------------------------------------------------------------------------------
 # Copy Application Files
 # ------------------------------------------------------------------------------
 log_info "Syncing application files from ${SCRIPT_DIR} to ${INSTALL_DIR}..."
@@ -497,6 +524,11 @@ if [ ! -f "${ENV_FILE}" ]; then
 
   log_info "Initializing the Dolt anti-tamper commit log at ${DOLT_LICENSE_LOG_PATH}..."
   mkdir -p "${DOLT_LICENSE_LOG_PATH}"
+  chown -R "${SERVICE_USER}:${SERVICE_GROUP}" "${DOLT_LICENSE_LOG_PATH}"
+  # The identity needed for `dolt init` here is root's (this shell), so set
+  # it inline rather than depending on the service-user identity written by
+  # `ensure_dolt_identity_for_service_user` (that one is for the systemd
+  # service process). Idempotent.
   dolt config --global --add user.name deltix-server >/dev/null 2>&1 || true
   dolt config --global --add user.email deltix-server@localhost >/dev/null 2>&1 || true
   (cd "${DOLT_LICENSE_LOG_PATH}" && dolt init) >/dev/null

@@ -314,8 +314,14 @@ export function createVersioningRouter(
       if (err instanceof RepoAlreadyProvisionedError) {
         return c.json({ error: err.message }, 409);
       }
+      // Provisioning failed for some other reason (dolt init exited non-zero,
+      // filesystem permission denied, dolt binary missing from PATH, etc.).
+      // Surface the underlying message so the operator can act on it instead
+      // of a generic "Failed to provision repo" — that error used to swallow
+      // every detail and force operators to dig through journalctl.
+      const message = err instanceof Error ? err.message : String(err);
       logger.error({ err, repoId: parsed.data.repoId }, 'Repo provisioning failed');
-      return c.json({ error: 'Failed to provision repo' }, 500);
+      return c.json({ error: message }, 500);
     }
   });
 
