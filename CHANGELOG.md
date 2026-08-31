@@ -9,6 +9,26 @@ Each entry starts with a **plain-language summary** (what changed, in
 everyday words) before any technical detail — written so someone outside
 engineering can understand what shipped and why it matters.
 
+## [0.8.3] - 2026-08-31
+
+**In plain terms:** global admins now have full access to every repo by
+default — no more having to ask themselves "please grant me reader
+access to the repo I just created, from the other account I happen to be
+logged in as".
+
+### Changed
+
+- **Global admins get implicit `admin` access to every repo.** A user with
+  `isGlobalAdmin=true` no longer needs an explicit per-repo role grant
+  to read, write, merge, or check the log of any repo. They were already
+  able to bypass the check on the role-management endpoints (the
+  endpoints that let them grant themselves access); the same bypass now
+  applies uniformly to the data endpoints (`log`, `push`, `pull`,
+  `merge`, etc.) that the role-management endpoints are supposed to
+  protect. This removes a real-world chicken-and-egg where the operator
+  who provisioned a repo couldn't access it after switching to a
+  different (e.g. human) account for daily use.
+
 ## [0.8.2] - 2026-08-31
 
 **In plain terms:** `deltix repo create` (and any operation that internally

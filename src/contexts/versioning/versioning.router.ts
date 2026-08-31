@@ -101,17 +101,26 @@ async function requireRepoRole(
     return username;
   }
   const role = await authService.getRepoRole(username, repoId);
-  if (!role || ROLE_RANK[role] < ROLE_RANK[minimumRole]) {
-    return c.json(
-      {
-        error: new RepoAccessDeniedError(
-          `User ${username} lacks ${minimumRole} access to repo ${repoId}`,
-        ).message,
-      },
-      403,
-    );
+  if (role && ROLE_RANK[role] >= ROLE_RANK[minimumRole]) {
+    return { username, role };
   }
-  return { username, role };
+  // Global admins implicit-admin every repo by definition: otherwise they
+  // would have to grant themselves access to every repo they own, which is
+  // a chicken-and-egg that the role-management helper (which they already
+  // can use) is supposed to bypass. Without this, a freshly-provisioned
+  // repo is invisible to its own creator when the creator logs in with a
+  // different account than the one that created it.
+  if (await authService.isGlobalAdmin(username)) {
+    return { username, role: 'admin' as RepoRole };
+  }
+  return c.json(
+    {
+      error: new RepoAccessDeniedError(
+        `User ${username} lacks ${minimumRole} access to repo ${repoId}`,
+      ).message,
+    },
+    403,
+  );
 }
 
 /**
