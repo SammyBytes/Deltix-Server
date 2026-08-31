@@ -9,6 +9,23 @@ Each entry starts with a **plain-language summary** (what changed, in
 everyday words) before any technical detail — written so someone outside
 engineering can understand what shipped and why it matters.
 
+## [0.8.4] - 2026-08-31
+
+**In plain terms:** `deltix push` returned 500 on every push because
+the server's router referenced an error class that wasn't imported.
+Crash with `ReferenceError: CommitImportError is not defined`.
+Now it imports the class.
+
+### Fixed
+
+- **`deltix push` returned 500 from the server with
+  `ReferenceError: CommitImportError is not defined`.** The push-commits
+  router caught `instanceof CommitImportError` but never imported the
+  class. Every push hit a `ReferenceError`, which the framework
+  reported as a generic 500. Tests didn't catch it because no test
+  exercised the actual push path with that error type.
+  Fix: add `CommitImportError` to the named-import block.
+
 ## [0.8.3] - 2026-08-31
 
 **In plain terms:** global admins now have full access to every repo by
