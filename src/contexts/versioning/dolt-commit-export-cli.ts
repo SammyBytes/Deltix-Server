@@ -92,7 +92,6 @@ async function changedTables(doltPath: string, commitHash: string): Promise<Chan
   return { tables, hadAnyDiff: rows.length > 0 };
 }
 
-
 async function tableData(doltPath: string, table: string, commitHash: string): Promise<string> {
   const r = await runDolt([
     '--data-dir',
@@ -133,6 +132,38 @@ async function tableSchema(doltPath: string, table: string, commitHash: string):
   return `${ddl};`;
 }
 
+/**
+ * Exports a single table's schema+data for `hash`, skipping (with a warn
+ * log) any table that turns out not to be resolvable `AS OF` this commit.
+ * Extracted out of `runDoltCommitExport`'s per-commit loop to keep that
+ * generator's cognitive complexity within lint limits.
+ */
+async function exportTable(
+  doltPath: string,
+  table: string,
+  hash: string,
+): Promise<{ name: string; schema: string; data: string } | undefined> {
+  // `changedTables` already filters out dropped tables (empty
+  // `to_table_name`) and resolves renames to their new name, so this should
+  // always succeed. The try/catch remains as defense-in-depth: if a lookup
+  // is ever unresolvable `AS OF` this commit for some other reason, skip
+  // just that table rather than letting it abort the whole NDJSON stream —
+  // that used to surface client-side as a raw closed-socket error on every
+  // pull/fetch once a repo's history contained any dropped or renamed table.
+  let schema: string;
+  try {
+    schema = await tableSchema(doltPath, table, hash);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    logger.warn(
+      { table, hash, error: message },
+      'skipping table export: not resolvable AS OF this commit (likely dropped/renamed later)',
+    );
+    return undefined;
+  }
+  return { name: table, schema, data: await tableData(doltPath, table, hash) };
+}
+
 export const runDoltCommitExport: RunDoltCommitExport = async function* ({
   doltPath,
   branch,
@@ -158,30 +189,10 @@ export const runDoltCommitExport: RunDoltCommitExport = async function* ({
     }
     const exported = [];
     for (const table of tables) {
-      // `changedTables` already filters out dropped tables (empty
-      // `to_table_name`) and resolves renames to their new name, so this
-      // should always succeed. The try/catch remains as defense-in-depth:
-      // if a lookup is ever unresolvable `AS OF` this commit for some other
-      // reason, skip just that table rather than letting it abort the whole
-      // NDJSON stream — that used to surface client-side as a raw
-      // closed-socket error on every pull/fetch once a repo's history
-      // contained any dropped or renamed table.
-      let schema: string;
-      try {
-        schema = await tableSchema(doltPath, table, hash);
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        logger.warn(
-          { table, hash, error: message },
-          'skipping table export: not resolvable AS OF this commit (likely dropped/renamed later)',
-        );
-        continue;
+      const result = await exportTable(doltPath, table, hash);
+      if (result) {
+        exported.push(result);
       }
-      exported.push({
-        name: table,
-        schema,
-        data: await tableData(doltPath, table, hash),
-      });
     }
     const commit: ExportedCommit = {
       hash,
