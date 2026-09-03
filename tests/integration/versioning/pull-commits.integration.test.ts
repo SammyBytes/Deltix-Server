@@ -72,6 +72,25 @@ describe.if(doltAvailable)('pull-commits export (real dolt, in-process router)',
     await $`${DOLT} --data-dir ${doltRepoPath} commit -m ${'drop orders'} ${authorArg}`
       .quiet()
       .nothrow();
+    // A rename commit reproduces a second, related history shape: `dolt diff
+    // --name-only` reports a renamed table under its OLD name, but that old
+    // name doesn't exist `AS OF` the rename commit either (only the new name
+    // does) -- so a naive "AS OF <old-name>" lookup fails just like the
+    // dropped-table case above, even though the table itself wasn't dropped.
+    await $`${DOLT} --data-dir ${doltRepoPath} sql -q ${'CREATE TABLE invoices (id INT PRIMARY KEY, total INT);'}`
+      .quiet()
+      .nothrow();
+    await $`${DOLT} --data-dir ${doltRepoPath} add invoices`.quiet().nothrow();
+    await $`${DOLT} --data-dir ${doltRepoPath} commit -m ${'add invoices'} ${authorArg}`
+      .quiet()
+      .nothrow();
+    await $`${DOLT} --data-dir ${doltRepoPath} sql -q ${'RENAME TABLE invoices TO bills;'}`
+      .quiet()
+      .nothrow();
+    await $`${DOLT} --data-dir ${doltRepoPath} add -A`.quiet().nothrow();
+    await $`${DOLT} --data-dir ${doltRepoPath} commit -m ${'rename invoices to bills'} ${authorArg}`
+      .quiet()
+      .nothrow();
 
     const userStore = new LibsqlUserStore(join(tempDir, 'users.db'));
     await userStore.init();
@@ -182,9 +201,9 @@ describe.if(doltAvailable)('pull-commits export (real dolt, in-process router)',
     const lines = text.split('\n').filter((l) => l.trim());
     const commits = lines.map((l) => JSON.parse(l) as { message: string; tables: unknown[] });
     expect(commits.some((c) => c.message === 'add customers')).toBe(true);
-    // the init commit (empty diff) is not exported; the three real ones are:
-    // add customers, add orders, drop orders.
-    expect(commits.length).toBe(3);
+    // the init commit (empty diff) is not exported; the five real ones are:
+    // add customers, add orders, drop orders, add invoices, rename invoices to bills.
+    expect(commits.length).toBe(5);
     const first = commits[0] as { tables: { name: string; schema: string; data: string }[] };
     expect(first.tables[0]?.schema).toMatch(/CREATE TABLE/i);
     expect(first.tables[0]?.data).toContain('Ana');
@@ -213,6 +232,30 @@ describe.if(doltAvailable)('pull-commits export (real dolt, in-process router)',
     // The drop itself is also exported cleanly (no crash), even though
     // `orders` no longer exists in the current/HEAD schema.
     expect(commits2.some((c) => c.message === 'drop orders')).toBe(true);
+  }, 15000);
+
+  it("exports a renamed table's schema under its new name for the commit that renamed it", async () => {
+    // Regression test: `dolt diff --name-only` reports a renamed table under
+    // its OLD name for the rename commit, but `AS OF <rename-hash>` can only
+    // resolve the table by its NEW name -- the old name is already gone at
+    // that revision. A naive lookup by the diff-reported name used to throw
+    // "table not found" and get silently skipped (or worse, abort the
+    // stream), even though the table itself was never dropped.
+    const res = await app.request('/repos/export-repo/pull-commits?branch=main', {
+      headers: { authorization: `Bearer ${aliceToken}` },
+    });
+    expect(res.status).toBe(200);
+    const text = await res.text();
+    const lines = text.split('\n').filter((l) => l.trim());
+    const commits = lines.map(
+      (l) => JSON.parse(l) as { message: string; tables: { name: string; schema: string }[] },
+    );
+    const rename = commits.find((c) => c.message === 'rename invoices to bills');
+    expect(rename?.tables.some((t) => t.name === 'bills')).toBe(true);
+    expect(rename?.tables.find((t) => t.name === 'bills')?.schema).toMatch(/CREATE TABLE `bills`/i);
+    // The old name is not exported under the rename commit (it doesn't exist
+    // AS OF that hash) -- only the new name is.
+    expect(rename?.tables.some((t) => t.name === 'invoices')).toBe(false);
   }, 15000);
 
   it('excludes commits already at the from hash', async () => {
@@ -245,7 +288,7 @@ describe.if(doltAvailable)('pull-commits export (real dolt, in-process router)',
     const commits = lines.map((l) => JSON.parse(l) as { message: string; tables: unknown[] });
     // Full history exported (all three real, non-empty commits).
     expect(commits.some((c) => c.message === 'add customers')).toBe(true);
-    expect(commits.length).toBe(3);
+    expect(commits.length).toBe(5);
   }, 15000);
 
   it('rejects an unauthenticated pull request', async () => {

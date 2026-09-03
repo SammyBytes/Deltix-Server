@@ -224,6 +224,13 @@ async function main(): Promise<void> {
   Bun.serve({
     port: httpPort,
     fetch: app.fetch,
+    // Bun's default idleTimeout (10s) is too tight for the pull-commits
+    // NDJSON stream: a full-history re-sync of a large repo, or a single
+    // commit with a large table, can go quiet for longer than that between
+    // writes. The route already emits a 5s heartbeat (see
+    // versioning.router.ts) to stay well inside this budget, but a generous
+    // server-level ceiling is kept as a defense-in-depth backstop.
+    idleTimeout: 60,
     ...(httpTlsEnabled
       ? {
           tls: {

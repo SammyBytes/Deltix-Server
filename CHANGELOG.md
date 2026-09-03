@@ -9,6 +9,78 @@ Each entry starts with a **plain-language summary** (what changed, in
 everyday words) before any technical detail — written so someone outside
 engineering can understand what shipped and why it matters.
 
+## [0.8.9] - 2026-09-03
+
+**In plain terms:** production `deltix pull`/`deltix fetch` against a large,
+real-world repository could still fail after 0.8.8 — this time the server
+closed the connection silently after logging a "streaming" message, with no
+error and no explanation, and the client kept retrying the exact same
+request forever. Two separate issues combined to cause this. First, the
+server was dropping idle connections after only 10 seconds by default, which
+a big repository's full-history re-sync can easily exceed since it re-runs
+several `dolt` commands per historical commit. Second, a repo history that
+includes a renamed table (not just a dropped one, which 0.8.8 already
+handled) could make the server skip exporting that table's data, and any
+unexpected failure during the export was never written to the server log —
+so operators had no way to see what actually went wrong. This release keeps
+long-running pulls alive, exports renamed-table history correctly, and logs
+every stream failure so it's diagnosable instead of silent.
+
+### Fixed
+
+- **`Bun.serve()` used the runtime's default 10-second idle timeout**, which
+  closes a connection if no bytes are written for that long — even mid
+  in-flight response. A full-history re-sync of a repo with many commits and
+  tables (each requiring multiple `dolt` subprocess calls per commit) can
+  easily go quiet for longer than that, especially over a slow disk or a
+  large `hmc-sync`-sized history. Bun then silently killed the socket, which
+  is exactly what a client sees as `TypeError: The socket connection was
+  closed unexpectedly` — no server-side error, no client-side explanation.
+  Fixed by raising the server's `idleTimeout` to 60 seconds
+  (`src/index.ts`) and, more importantly, adding a 5-second heartbeat inside
+  the `pull-commits` stream (`versioning.router.ts`) that writes a blank
+  keepalive line whenever real export progress goes quiet — the client's
+  NDJSON line parser already ignores blank lines, so this is fully
+  backward-compatible and keeps the connection well inside any idle-timeout
+  budget regardless of repo size.
+- **`pull-commits` stream failures were never logged.** The router's stream
+  `catch` block called `controller.error(err)` to abort the response but
+  never wrote anything to the server log, so an operator investigating a
+  failed pull/fetch would see the "Streaming pull-commits" info line and then
+  nothing — no indication of what happened or why. The catch block now logs
+  the error (with `repoId`, `branch`, and `from`) at `error` level before
+  aborting the stream.
+- **A commit that renames a table exported no data for that table.**
+  `changedTables()` used `dolt diff --name-only`, which reports a renamed
+  table under its **old** name for the commit that renamed it — but that old
+  name doesn't exist `AS OF` the rename commit (Dolt semantics: only the
+  *new* name resolves at that revision). The v0.8.8 fix's defense-in-depth
+  try/catch silently skipped the lookup as "not resolvable," meaning any
+  repo with rename history exported those commits with incomplete/missing
+  table data instead of failing loudly — a correctness bug, not a crash.
+  Fixed by querying `dolt_diff_summary('<hash>^', '<hash>')` instead, which
+  reports `to_table_name` (the name that actually resolves `AS OF` that
+  commit) and naturally excludes dropped tables (empty `to_table_name`)
+  without needing the try/catch workaround for that case.
+- **A commit that only drops tables (no other changes) was no longer
+  reported to the client.** Fixing the above required distinguishing "this
+  commit touched no tables at all" (a genuine no-op, correctly skipped) from
+  "this commit's only table changes were drops" (a real commit that should
+  still appear in history, just with an empty table list) — `changedTables()`
+  now reports both the exportable table list and whether the commit had any
+  diff at all, so the export loop only skips genuinely empty commits.
+
+### Tests
+
+- Extended `pull-commits.integration.test.ts`'s seeded history with an
+  `add invoices` / `rename invoices to bills` pair and a new regression test
+  asserting the rename commit exports the table under its new name (`bills`)
+  with correct schema, and never under the old name (`invoices`). Reproduced
+  the original bug first (reverting the fix re-triggers `table not found:
+  invoices`), then verified the fix resolves it. Updated the two existing
+  `commits.length` assertions from 3 to 5 for the two new real commits.
+  Full suite: 277 unit, 230 integration, 34 smoke — all passing.
+
 ## [0.8.8] - 2026-09-03
 
 **In plain terms:** `deltix pull`/`deltix fetch` could crash outright — not

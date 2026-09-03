@@ -753,13 +753,40 @@ export function createVersioningRouter(
       const encoder = new TextEncoder();
       const stream = new ReadableStream<Uint8Array>({
         async start(controller) {
+          // Bun.serve closes a connection after `idleTimeout` (default 10s)
+          // of no bytes written — a real risk here since a full-history
+          // re-sync (see queryCommitsSince) or a commit with large table
+          // data can take longer than that between NDJSON lines. A blank
+          // line is a harmless keepalive: the client's line parser already
+          // filters out empty lines (`line.trim().length > 0`), so this is
+          // wire-compatible with every client version. Without this, a slow
+          // commit silently kills the connection client-side as a raw
+          // "socket closed unexpectedly" error with nothing in the server
+          // log to explain it.
+          let finished = false;
+          const heartbeat = setInterval(() => {
+            if (finished) return;
+            try {
+              controller.enqueue(encoder.encode('\n'));
+            } catch {
+              // stream already closed/errored elsewhere; ignore
+            }
+          }, 5000);
           try {
             for await (const commit of commitExportService.streamCommits(repoId, branch, from)) {
               controller.enqueue(encoder.encode(`${JSON.stringify(commit)}\n`));
             }
             controller.close();
           } catch (err) {
+            // Previously swallowed: an error here aborted the stream (and
+            // the client saw a bare closed-socket error) with NOTHING
+            // logged server-side, making this class of failure invisible in
+            // production. Always log before erroring the controller.
+            logger.error({ err, repoId, branch, from }, 'pull-commits stream failed');
             controller.error(err);
+          } finally {
+            finished = true;
+            clearInterval(heartbeat);
           }
         },
       });
