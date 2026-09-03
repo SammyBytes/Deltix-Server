@@ -376,7 +376,6 @@ export interface DoctorSuiteResult {
   checks: DoctorCheckResult[];
 }
 
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: intentionally a flat, linear sequence of independent try/catch diagnostic checks (runtime, OS, disk, SQLite, crypto keys, network ports, ...); each check is already isolated in its own try/catch and shares no state with the others, so splitting further would add indirection without reducing risk.
 /**
  * Returns true when the deltix systemd service is currently active (running).
  * The doctor uses this to distinguish a genuinely free port from one already
@@ -398,6 +397,7 @@ function isDeltixServiceActive(): boolean {
   }
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: intentionally a flat, linear sequence of independent try/catch diagnostic checks (runtime, OS, disk, SQLite, crypto keys, network ports, ...); each check is already isolated in its own try/catch and shares no state with the others, so splitting further would add indirection without reducing risk.
 export async function runDoctorSuite(configPath?: string): Promise<DoctorSuiteResult> {
   const checks: DoctorCheckResult[] = [];
   const serviceActive = isDeltixServiceActive();

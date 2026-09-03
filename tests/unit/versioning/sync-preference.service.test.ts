@@ -1,9 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import {
-  InvalidRepoIdError,
-  RepoNotFoundError,
-  SyncPreferenceConflictError,
-} from '../../../src/contexts/versioning/errors';
+import { InvalidRepoIdError, RepoNotFoundError } from '../../../src/contexts/versioning/errors';
 import type { RepoStore } from '../../../src/contexts/versioning/repo-store';
 import { SyncPreferenceService } from '../../../src/contexts/versioning/sync-preference.service';
 import type { RepoRecord, RepoSyncPreferenceSummary } from '../../../src/contexts/versioning/types';

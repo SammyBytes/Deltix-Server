@@ -192,10 +192,9 @@ describe.if(doltAvailable)('pull-commits export (real dolt, in-process router)',
     // hash ("target commit not found") — the server must not fail the pull;
     // it should export the full history so the client reconciles from scratch.
     const bogusFrom = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
-    const res = await app.request(
-      `/repos/export-repo/pull-commits?branch=main&from=${bogusFrom}`,
-      { headers: { authorization: `Bearer ${aliceToken}` } },
-    );
+    const res = await app.request(`/repos/export-repo/pull-commits?branch=main&from=${bogusFrom}`, {
+      headers: { authorization: `Bearer ${aliceToken}` },
+    });
     expect(res.status).toBe(200);
     const text = await res.text();
     const lines = text.split('\n').filter((l) => l.trim());
