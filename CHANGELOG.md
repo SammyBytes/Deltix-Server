@@ -9,6 +9,38 @@ Each entry starts with a **plain-language summary** (what changed, in
 everyday words) before any technical detail — written so someone outside
 engineering can understand what shipped and why it matters.
 
+## [0.8.7] - 2026-09-03
+
+**In plain terms:** when a CLI client pulls the latest changes, the server used
+to abort the request if the client's "I'm up to this point" reference was no
+longer reachable in history — which could happen after a branch was rebuilt
+server-side. That surfaced as a confusing "commit not found" error. Now the
+server can tell the client to start fresh and send the full history instead of
+failing, so syncing keeps working even when the histories have drifted apart.
+
+### Fixed
+
+- **`GET /repos/:repoId/pull-commits` failed with "target commit not found"**
+  when the client's negotiated `from` hash was no longer an ancestor of the
+  requested branch (e.g. after a server-side branch rewrite). Root cause: the
+  export ran Dolt's `AS OF '<fromHash>' ... WHERE commit_hash NOT IN (SELECT
+  commit_hash FROM dolt_log AS OF '<fromHash>')`, and Dolt raises that exact
+  error when `fromHash` is not reachable from the branch, so the whole pull
+  was aborted instead of recovering.
+- **Request now degrades to a full-history re-sync** instead of failing.
+  `runDoltCommitExport` resolves the branch head, attempts the delta query and
+  detects Dolt's "target commit not found". It then falls back to streaming the
+  complete branch history, letting the client reconcile idempotently. The
+  degradation is logged at warn level
+  (`pull from-hash not reachable; degrading to full-history re-sync`).
+
+### Tests
+
+- New integration test in `pull-commits.integration.test.ts` drives a stale,
+  unreachable `from` hash and asserts the server responds `200` with the full
+  exported history rather than an error. Unit + integration suite for
+  versioning: 141 passing, 0 failing.
+
 ## [0.8.6] - 2026-08-31
 
 **In plain terms:** the refresh-token session lifetime now defaults to

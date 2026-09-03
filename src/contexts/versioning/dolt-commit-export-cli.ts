@@ -8,13 +8,16 @@
  * `dolt_log` (JSON) to enumerate commits, `dolt diff --name-only` for changed
  * tables, and `SELECT * FROM <t> AS OF <hash>` (CSV) for the per-commit data.
  */
+
+import { createLogger } from '../../shared/logger';
 import type {
   ExportedCommit,
-  RepoRef,
   RunDoltBranchHead,
   RunDoltCommitExport,
   RunDoltListRefs,
 } from './commit-export.service';
+
+const logger = createLogger('dolt:export');
 
 const SAFE_TABLE_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
@@ -96,13 +99,14 @@ export const runDoltCommitExport: RunDoltCommitExport = async function* ({
   branch,
   fromHash,
 }) {
-  const where = fromHash
-    ? `WHERE commit_hash NOT IN (SELECT commit_hash FROM dolt_log AS OF '${escapeSql(fromHash)}')`
-    : '';
-  const rows = await queryJson(
-    doltPath,
-    `SELECT commit_hash, message, author FROM dolt_log AS OF '${escapeSql(branch)}' ${where} ORDER BY commit_order ASC`,
-  );
+  // `from` is a client-negotiated hash it believes it already has. If that
+  // hash is stale or unreachable from the branch (e.g. the branch was
+  // rewritten/force-replaced on the server, or the client predates the
+  // current history), Dolt's `AS OF` rejects it — which used to surface as a
+  // hard failure ("target commit not found") and broke the whole pull/fetch.
+  // Make pull resilient: fall back to exporting the full history (a re-sync)
+  // so the client reconciles from a known-good base instead of erroring out.
+  const rows = await queryCommitsSince(doltPath, branch, fromHash ?? null);
 
   for (const row of rows) {
     const hash = row.commit_hash;
@@ -130,6 +134,34 @@ export const runDoltCommitExport: RunDoltCommitExport = async function* ({
     yield commit;
   }
 };
+
+/**
+ * Lists commits on `branch` (oldest-first), optionally restricted to those not
+ * reachable from `fromHash`. If `fromHash` is not a valid/reachable commit on
+ * the branch, Dolt rejects the `AS OF` filter; we then degrade to the full
+ * history so the caller re-syncs rather than failing hard.
+ */
+async function queryCommitsSince(
+  doltPath: string,
+  branch: string,
+  fromHash: string | null,
+): Promise<Record<string, string>[]> {
+  const base = `SELECT commit_hash, message, author FROM dolt_log AS OF '${escapeSql(branch)}'`;
+  if (fromHash) {
+    const where = `WHERE commit_hash NOT IN (SELECT commit_hash FROM dolt_log AS OF '${escapeSql(fromHash)}')`;
+    try {
+      return await queryJson(doltPath, `${base} ${where} ORDER BY commit_order ASC`);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      logger.warn(
+        { branch, fromHash, error: message },
+        'pull from-hash not reachable; degrading to full-history re-sync',
+      );
+      // fall through to full export below
+    }
+  }
+  return queryJson(doltPath, `${base} ORDER BY commit_order ASC`);
+}
 
 export const runDoltBranchHead: RunDoltBranchHead = async ({ doltPath, branch }) => {
   const r = await runDolt([

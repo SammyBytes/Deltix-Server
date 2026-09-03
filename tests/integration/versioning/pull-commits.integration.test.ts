@@ -186,6 +186,25 @@ describe.if(doltAvailable)('pull-commits export (real dolt, in-process router)',
     expect(text.trim()).toBe('');
   });
 
+  it('degrades a stale/unreachable from hash to a full re-sync instead of failing', async () => {
+    // Simulate a client whose negotiated `from` hash is no longer reachable on
+    // the branch (e.g. the branch was rewritten server-side). Dolt rejects that
+    // hash ("target commit not found") — the server must not fail the pull;
+    // it should export the full history so the client reconciles from scratch.
+    const bogusFrom = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+    const res = await app.request(
+      `/repos/export-repo/pull-commits?branch=main&from=${bogusFrom}`,
+      { headers: { authorization: `Bearer ${aliceToken}` } },
+    );
+    expect(res.status).toBe(200);
+    const text = await res.text();
+    const lines = text.split('\n').filter((l) => l.trim());
+    const commits = lines.map((l) => JSON.parse(l) as { message: string; tables: unknown[] });
+    // Full history exported (only the real, non-empty commit).
+    expect(commits.some((c) => c.message === 'add customers')).toBe(true);
+    expect(commits.length).toBe(1);
+  });
+
   it('rejects an unauthenticated pull request', async () => {
     const res = await app.request('/repos/export-repo/pull-commits?branch=main');
     expect(res.status).toBe(401);
