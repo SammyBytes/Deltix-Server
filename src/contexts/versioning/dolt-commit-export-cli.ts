@@ -86,12 +86,28 @@ async function tableData(doltPath: string, table: string, commitHash: string): P
   return r.stdout;
 }
 
-async function tableSchema(doltPath: string, table: string): Promise<string> {
-  const r = await runDolt(['--data-dir', doltPath, 'schema', 'export', table]);
-  if (r.exitCode !== 0) {
-    throw new Error(`dolt schema export of ${table} failed: ${r.stderr.trim()}`);
+/**
+ * Exports `table`'s CREATE TABLE DDL as it existed at `commitHash` — never the
+ * current/HEAD schema. `dolt schema export` (used by the client's push path,
+ * where the table is always the caller's own current schema) only reads the
+ * live working set, so it throws "table not found" for any commit that
+ * touched a table later dropped or renamed. Pull/fetch must tolerate that:
+ * older commits in a repo's history routinely reference tables that no
+ * longer exist by that name today, and failing here used to abort the whole
+ * NDJSON stream mid-flight (surfacing to the client as a raw closed-socket
+ * error, not a useful message). `SHOW CREATE TABLE ... AS OF` time-travels
+ * the query itself, so it succeeds regardless of the table's current fate.
+ */
+async function tableSchema(doltPath: string, table: string, commitHash: string): Promise<string> {
+  const rows = await queryJson(
+    doltPath,
+    `SHOW CREATE TABLE ${table} AS OF '${escapeSql(commitHash)}'`,
+  );
+  const ddl = rows[0]?.['Create Table'];
+  if (!ddl) {
+    throw new Error(`dolt schema export of ${table} AS OF ${commitHash} returned no DDL`);
   }
-  return r.stdout;
+  return `${ddl};`;
 }
 
 export const runDoltCommitExport: RunDoltCommitExport = async function* ({
@@ -119,9 +135,29 @@ export const runDoltCommitExport: RunDoltCommitExport = async function* ({
     }
     const exported = [];
     for (const table of tables) {
+      // `dolt diff --name-only` reports a table as "changed" for the commit
+      // that DROPPED it too — but `AS OF <hash>` reflects the state *after*
+      // that commit, so the table genuinely doesn't exist there anymore and
+      // both schema and data lookups fail. DROP TABLE propagation to clients
+      // isn't supported yet (the pull/apply protocol has no "drop" verb), so
+      // skip exporting this table for this commit rather than letting the
+      // lookup failure abort the whole NDJSON stream — that used to surface
+      // client-side as a raw closed-socket error on every pull/fetch once a
+      // repo's history contained any dropped or renamed table.
+      let schema: string;
+      try {
+        schema = await tableSchema(doltPath, table, hash);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        logger.warn(
+          { table, hash, error: message },
+          'skipping table export: not resolvable AS OF this commit (likely dropped/renamed later)',
+        );
+        continue;
+      }
       exported.push({
         name: table,
-        schema: await tableSchema(doltPath, table),
+        schema,
         data: await tableData(doltPath, table, hash),
       });
     }

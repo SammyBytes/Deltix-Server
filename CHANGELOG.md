@@ -9,6 +9,51 @@ Each entry starts with a **plain-language summary** (what changed, in
 everyday words) before any technical detail — written so someone outside
 engineering can understand what shipped and why it matters.
 
+## [0.8.8] - 2026-09-03
+
+**In plain terms:** `deltix pull`/`deltix fetch` could crash outright — not
+with a clean error, but with the connection dropping mid-request — for any
+repository whose history includes a table that was later dropped or renamed.
+This is common in real projects as schemas evolve. The server now exports
+that history correctly instead of losing the connection, so pull/fetch work
+reliably regardless of how a repo's schema changed over time.
+
+### Fixed
+
+- **`GET /repos/:repoId/pull-commits` closed the connection mid-stream**
+  ("socket connection was closed unexpectedly" on the client) whenever the
+  exported history included a commit that touched a table later dropped or
+  renamed. Two root causes, both in `dolt-commit-export-cli.ts`:
+  1. `tableSchema()` used `dolt schema export <table>`, which only reads the
+     table's **current** (HEAD) definition. For any earlier commit whose
+     table no longer exists today, this failed with `table not found` —
+     unconditionally, for every pull, not only after the v0.8.7 stale-hash
+     degradation kicks in.
+  2. Even after fixing (1), a commit that *itself* drops a table has no
+     schema/data to export `AS OF` that same commit (the table is already
+     gone at that revision) — the lookup correctly fails there too.
+  Neither error was caught inside the NDJSON generator, so it propagated to
+  the HTTP router's stream `controller.error(err)`, which aborts the response
+  after headers (and a `200`) were already sent — the client only ever saw a
+  raw closed socket, never a diagnosable error.
+- **Historical schema is now read `AS OF` the commit that touched it**, via
+  `SHOW CREATE TABLE <table> AS OF '<hash>'` instead of the HEAD-only `dolt
+  schema export`, so a table's DDL exports correctly for any commit in a
+  repo's history, dropped/renamed later or not.
+- **A table a commit itself drops is skipped for that commit** (logged at
+  warn level) rather than aborting the whole stream. Dropping a table isn't
+  yet propagated to pull/fetch clients (the apply protocol has no "drop"
+  verb) — this is a known, non-fatal limitation, not a crash.
+
+### Tests
+
+- New integration tests in `pull-commits.integration.test.ts` seed a repo with
+  a table created and later dropped, and assert `pull-commits` streams the
+  full history (200, correct DDL for the historical commit, no crash) instead
+  of aborting. Reproduced the original failure first (reverting the fix
+  re-triggers `table not found`), then verified the fix resolves it. Full
+  suite: 277 unit, 229 integration, 34 smoke — all passing.
+
 ## [0.8.7] - 2026-09-03
 
 **In plain terms:** when a CLI client pulls the latest changes, the server used

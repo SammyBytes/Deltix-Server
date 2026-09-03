@@ -54,6 +54,24 @@ describe.if(doltAvailable)('pull-commits export (real dolt, in-process router)',
     await $`${DOLT} --data-dir ${doltRepoPath} commit -m ${'add customers'} ${authorArg}`
       .quiet()
       .nothrow();
+    // A later commit creates `orders`, then a subsequent one drops it --
+    // reproduces the real-world history shape that broke full re-sync:
+    // `dolt schema export` (current schema) can't see a table that no
+    // longer exists, so exporting the "add orders" commit used to throw and
+    // abort the NDJSON stream mid-response (surfacing client-side as a raw
+    // closed-socket error instead of a clean failure).
+    await $`${DOLT} --data-dir ${doltRepoPath} sql -q ${'CREATE TABLE orders (id INT PRIMARY KEY, customer_id INT);'}`
+      .quiet()
+      .nothrow();
+    await $`${DOLT} --data-dir ${doltRepoPath} add orders`.quiet().nothrow();
+    await $`${DOLT} --data-dir ${doltRepoPath} commit -m ${'add orders'} ${authorArg}`
+      .quiet()
+      .nothrow();
+    await $`${DOLT} --data-dir ${doltRepoPath} sql -q ${'DROP TABLE orders;'}`.quiet().nothrow();
+    await $`${DOLT} --data-dir ${doltRepoPath} add -A`.quiet().nothrow();
+    await $`${DOLT} --data-dir ${doltRepoPath} commit -m ${'drop orders'} ${authorArg}`
+      .quiet()
+      .nothrow();
 
     const userStore = new LibsqlUserStore(join(tempDir, 'users.db'));
     await userStore.init();
@@ -164,12 +182,38 @@ describe.if(doltAvailable)('pull-commits export (real dolt, in-process router)',
     const lines = text.split('\n').filter((l) => l.trim());
     const commits = lines.map((l) => JSON.parse(l) as { message: string; tables: unknown[] });
     expect(commits.some((c) => c.message === 'add customers')).toBe(true);
-    // the init commit (empty diff) is not exported; only the real one.
-    expect(commits.length).toBe(1);
+    // the init commit (empty diff) is not exported; the three real ones are:
+    // add customers, add orders, drop orders.
+    expect(commits.length).toBe(3);
     const first = commits[0] as { tables: { name: string; schema: string; data: string }[] };
     expect(first.tables[0]?.schema).toMatch(/CREATE TABLE/i);
     expect(first.tables[0]?.data).toContain('Ana');
-  });
+  }, 15000);
+
+  it("exports a commit's schema even for a table dropped in a later commit", async () => {
+    // Regression test: `dolt schema export` only sees the CURRENT schema, so
+    // exporting the "add orders" commit used to throw "table not found" once
+    // a later commit dropped `orders` -- aborting the whole NDJSON stream
+    // mid-response instead of returning a clean result. The schema must be
+    // resolved AS OF the commit's own hash, not HEAD's.
+    const res2 = await app.request('/repos/export-repo/pull-commits?branch=main', {
+      headers: { authorization: `Bearer ${aliceToken}` },
+    });
+    expect(res2.status).toBe(200);
+    const text2 = await res2.text();
+    const lines2 = text2.split('\n').filter((l) => l.trim());
+    const commits2 = lines2.map(
+      (l) => JSON.parse(l) as { message: string; tables: { name: string; schema: string }[] },
+    );
+    const addOrders = commits2.find((c) => c.message === 'add orders');
+    expect(addOrders?.tables.some((t) => t.name === 'orders')).toBe(true);
+    expect(addOrders?.tables.find((t) => t.name === 'orders')?.schema).toMatch(
+      /CREATE TABLE `orders`/i,
+    );
+    // The drop itself is also exported cleanly (no crash), even though
+    // `orders` no longer exists in the current/HEAD schema.
+    expect(commits2.some((c) => c.message === 'drop orders')).toBe(true);
+  }, 15000);
 
   it('excludes commits already at the from hash', async () => {
     const headRes = await app.request('/repos/export-repo/refs', {
@@ -199,10 +243,10 @@ describe.if(doltAvailable)('pull-commits export (real dolt, in-process router)',
     const text = await res.text();
     const lines = text.split('\n').filter((l) => l.trim());
     const commits = lines.map((l) => JSON.parse(l) as { message: string; tables: unknown[] });
-    // Full history exported (only the real, non-empty commit).
+    // Full history exported (all three real, non-empty commits).
     expect(commits.some((c) => c.message === 'add customers')).toBe(true);
-    expect(commits.length).toBe(1);
-  });
+    expect(commits.length).toBe(3);
+  }, 15000);
 
   it('rejects an unauthenticated pull request', async () => {
     const res = await app.request('/repos/export-repo/pull-commits?branch=main');
