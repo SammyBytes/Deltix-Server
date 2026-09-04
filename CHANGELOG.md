@@ -9,6 +9,46 @@ Each entry starts with a **plain-language summary** (what changed, in
 everyday words) before any technical detail — written so someone outside
 engineering can understand what shipped and why it matters.
 
+## [0.9.1] - 2026-09-04
+
+**In plain terms:** any repository with a FULLTEXT search index on a table
+(e.g. `FULLTEXT KEY` for text search) could break `deltix pull`/`push`. Dolt
+tracks a FULLTEXT index internally using several hidden helper tables, and
+the server was treating those as regular user tables — trying to export and
+re-import them like any other table. Their auto-generated names are often
+too long for MySQL's identifier limit, so the client's apply would fail with
+a cryptic `invalid identifier` error. The server (and, for the import side,
+the push path too) now recognizes and skips these hidden tables entirely —
+they don't need to be synced; Dolt regenerates them automatically from the
+owning table's index definition.
+
+### Fixed
+
+- **Dolt's hidden FULLTEXT backing tables (`dolt_..._fts_doc_count`,
+  `_fts_global_count`, `_fts_position`, `_fts_row_count`, `_fts_config`) were
+  exported and imported as if they were ordinary user tables.** They show up
+  in `dolt_diff_summary` as "changed" alongside the table that actually owns
+  the FULLTEXT index, but they are Dolt-managed derived state with no data
+  of their own, and their long auto-generated names routinely exceed MySQL's
+  64-character identifier limit — a client applying the exported DDL would
+  fail with `invalid identifier` on any repo using FULLTEXT search. New
+  `fulltext-tables.ts` module (`isDoltFulltextInternalTable`) recognizes them
+  by name pattern; both `dolt-commit-export-cli.ts` (pull/fetch path) and
+  `dolt-commit-import-cli.ts` (push path) now filter them out before
+  exporting/importing, letting Dolt regenerate them automatically from the
+  owning table's `FULLTEXT KEY` instead.
+
+### Tests
+
+- New `fulltext-tables.test.ts` unit tests covering all five backing-table
+  name suffixes and confirming user/owner table names are never misidentified.
+- New integration test in `pull-commits.integration.test.ts` seeds a real
+  commit that creates a table with a `FULLTEXT KEY` (verified locally that
+  Dolt materializes the five hidden backing tables and reports them via
+  `dolt_diff_summary`) and asserts the exported commit includes the owning
+  table but none of the `_fts_*` backing tables. Full suite: 283 unit, 231
+  integration, 34 smoke — all passing.
+
 ## [0.9.0] - 2026-09-04
 
 **In plain terms:** Until now, when you pushed your saved work to a shared

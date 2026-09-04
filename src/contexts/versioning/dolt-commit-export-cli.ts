@@ -16,6 +16,7 @@ import type {
   RunDoltCommitExport,
   RunDoltListRefs,
 } from './commit-export.service';
+import { isDoltFulltextInternalTable } from './fulltext-tables';
 
 const logger = createLogger('dolt:export');
 
@@ -88,7 +89,15 @@ async function changedTables(doltPath: string, commitHash: string): Promise<Chan
   }
   const tables = rows
     .map((row) => row.to_table_name ?? '')
-    .filter((table) => table.length > 0 && SAFE_TABLE_RE.test(table));
+    .filter(
+      // Dolt reports its hidden FULLTEXT backing tables (dolt_..._fts_*) as
+      // changed alongside their owner. They are derived state that regenerates
+      // from the owner's FULLTEXT KEY, must not be exported (their names can
+      // exceed MySQL's 64-char identifier limit, which fails the client's apply
+      // with `invalid identifier`), and hold no user data.
+      (table) =>
+        table.length > 0 && SAFE_TABLE_RE.test(table) && !isDoltFulltextInternalTable(table),
+    );
   return { tables, hadAnyDiff: rows.length > 0 };
 }
 

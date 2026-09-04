@@ -91,6 +91,20 @@ describe.if(doltAvailable)('pull-commits export (real dolt, in-process router)',
     await $`${DOLT} --data-dir ${doltRepoPath} commit -m ${'rename invoices to bills'} ${authorArg}`
       .quiet()
       .nothrow();
+    // Dolt materializes a FULLTEXT index as several hidden backing tables
+    // (dolt_..._fts_doc_count/global_count/position/row_count/config)
+    // alongside the owner. They show up in dolt_diff_summary as "changed"
+    // but must never be exported/imported as standalone tables: their names
+    // can exceed MySQL's 64-char identifier limit (breaking a client's
+    // apply with `invalid identifier`), and they're derived state that
+    // regenerates automatically from the owner's FULLTEXT KEY.
+    await $`${DOLT} --data-dir ${doltRepoPath} sql -q ${'CREATE TABLE docs (id INT PRIMARY KEY, body TEXT, FULLTEXT KEY ft_body (body));'}`
+      .quiet()
+      .nothrow();
+    await $`${DOLT} --data-dir ${doltRepoPath} add -A`.quiet().nothrow();
+    await $`${DOLT} --data-dir ${doltRepoPath} commit -m ${'add docs with fulltext index'} ${authorArg}`
+      .quiet()
+      .nothrow();
 
     const userStore = new LibsqlUserStore(join(tempDir, 'users.db'));
     await userStore.init();
@@ -201,9 +215,10 @@ describe.if(doltAvailable)('pull-commits export (real dolt, in-process router)',
     const lines = text.split('\n').filter((l) => l.trim());
     const commits = lines.map((l) => JSON.parse(l) as { message: string; tables: unknown[] });
     expect(commits.some((c) => c.message === 'add customers')).toBe(true);
-    // the init commit (empty diff) is not exported; the five real ones are:
-    // add customers, add orders, drop orders, add invoices, rename invoices to bills.
-    expect(commits.length).toBe(5);
+    // the init commit (empty diff) is not exported; the six real ones are:
+    // add customers, add orders, drop orders, add invoices, rename invoices to
+    // bills, add docs with fulltext index.
+    expect(commits.length).toBe(6);
     const first = commits[0] as { tables: { name: string; schema: string; data: string }[] };
     expect(first.tables[0]?.schema).toMatch(/CREATE TABLE/i);
     expect(first.tables[0]?.data).toContain('Ana');
@@ -258,6 +273,27 @@ describe.if(doltAvailable)('pull-commits export (real dolt, in-process router)',
     expect(rename?.tables.some((t) => t.name === 'invoices')).toBe(false);
   }, 15000);
 
+  it("excludes Dolt's hidden FULLTEXT backing tables from a commit's exported tables", async () => {
+    // Regression test: a FULLTEXT index materializes several hidden backing
+    // tables (dolt_..._fts_doc_count/global_count/position/row_count/config)
+    // that dolt_diff_summary reports as "changed" alongside the owning
+    // table. Exporting them as standalone tables breaks the client's apply
+    // (their auto-generated names can exceed MySQL's 64-char identifier
+    // limit) even though they hold no user data of their own.
+    const res = await app.request('/repos/export-repo/pull-commits?branch=main', {
+      headers: { authorization: `Bearer ${aliceToken}` },
+    });
+    expect(res.status).toBe(200);
+    const text = await res.text();
+    const lines = text.split('\n').filter((l) => l.trim());
+    const commits = lines.map(
+      (l) => JSON.parse(l) as { message: string; tables: { name: string }[] },
+    );
+    const fulltext = commits.find((c) => c.message === 'add docs with fulltext index');
+    expect(fulltext?.tables.some((t) => t.name === 'docs')).toBe(true);
+    expect(fulltext?.tables.some((t) => t.name.includes('_fts_'))).toBe(false);
+  }, 15000);
+
   it('excludes commits already at the from hash', async () => {
     const headRes = await app.request('/repos/export-repo/refs', {
       headers: { authorization: `Bearer ${aliceToken}` },
@@ -288,7 +324,7 @@ describe.if(doltAvailable)('pull-commits export (real dolt, in-process router)',
     const commits = lines.map((l) => JSON.parse(l) as { message: string; tables: unknown[] });
     // Full history exported (all three real, non-empty commits).
     expect(commits.some((c) => c.message === 'add customers')).toBe(true);
-    expect(commits.length).toBe(5);
+    expect(commits.length).toBe(6);
   }, 15000);
 
   it('rejects an unauthenticated pull request', async () => {
