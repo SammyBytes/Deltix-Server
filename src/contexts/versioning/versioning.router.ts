@@ -681,6 +681,10 @@ export function createVersioningRouter(
       // The server head the client last pulled from (its push base). When
       // present, the server rejects a non-fast-forward push (remote advanced).
       from: z.string().optional(),
+      // The branch the client is actually pushing to (its bound project
+      // branch, e.g. `sync-develop-base`). Falls back to `main` server-side
+      // when omitted, for backward compatibility with older clients.
+      branch: z.string().min(1).max(128).optional(),
     });
 
     app.post('/repos/:repoId/push-commits', async (c) => {
@@ -709,6 +713,7 @@ export function createVersioningRouter(
           c.req.param('repoId'),
           parsed.data.commits,
           parsed.data.from ?? null,
+          parsed.data.branch,
         );
         logger.info(
           {

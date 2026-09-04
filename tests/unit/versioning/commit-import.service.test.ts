@@ -225,4 +225,58 @@ describe('versioning/CommitImportService', () => {
     expect(result.commitHash).toBe('newhash');
     expect(runImport).toHaveBeenCalled();
   });
+
+  it('forwards the client-requested branch to the commit runner instead of always importing to main', async () => {
+    const store = createRepoStore();
+    await store.init();
+    await store.create({
+      repoId: 'demo',
+      doltPath: join(tempDir, 'demo'),
+      createdAt: 1,
+      createdBy: 'seed',
+    });
+
+    const runImport = mock(async () => 'newhash');
+    const service = new CommitImportService(store, runImport);
+
+    await service.importCommits(
+      'demo',
+      [{ message: 'feat', author: 'alice', tables: [{ name: 't', data: 'id\n1' }] }],
+      null,
+      'sync-develop-base',
+    );
+
+    expect(runImport).toHaveBeenCalledWith(
+      expect.objectContaining({ branch: 'sync-develop-base' }),
+    );
+  });
+
+  it('checks the remote head on the client-requested branch, not always main', async () => {
+    const store = createRepoStore();
+    await store.init();
+    await store.create({
+      repoId: 'demo',
+      doltPath: join(tempDir, 'demo'),
+      createdAt: 1,
+      createdBy: 'seed',
+    });
+
+    const runImport = mock(async () => 'newhash');
+    const runBranchHead = mock(async ({ branch }: { branch: string }) =>
+      branch === 'sync-develop-base' ? 'basehead' : 'wrong-branch-head',
+    );
+    const service = new CommitImportService(store, runImport, runBranchHead);
+
+    const result = await service.importCommits(
+      'demo',
+      [{ message: 'feat', author: 'alice', tables: [{ name: 't', data: 'id\n1' }] }],
+      'basehead',
+      'sync-develop-base',
+    );
+
+    expect(result.commitHash).toBe('newhash');
+    expect(runBranchHead).toHaveBeenCalledWith(
+      expect.objectContaining({ branch: 'sync-develop-base' }),
+    );
+  });
 });

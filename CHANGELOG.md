@@ -9,6 +9,47 @@ Each entry starts with a **plain-language summary** (what changed, in
 everyday words) before any technical detail — written so someone outside
 engineering can understand what shipped and why it matters.
 
+## [0.9.2] - 2026-09-04
+
+**In plain terms:** even after fixing the client so it remembers which
+branch you actually checked out, the server side of `deltix push` was still
+always writing pushed commits onto its default branch (`main`) no matter
+which branch the client said it was pushing from. If your project used a
+different working branch (for example `sync-develop-base`), your pushes
+were quietly landing on the wrong branch on the server — which, combined
+with the client-side bug already fixed in Deltix-Client v0.8.8, is the full
+root cause of the "branch disappeared" incident reported in issue #57.
+Fixed: the server now checks out and imports onto the branch the client
+actually asks for.
+
+### Fixed
+
+- **`POST /repos/:repoId/push-commits` now accepts an optional `branch`
+  field** in its request body and forwards it through
+  `CommitImportService.importCommits()` to `runDoltCommitImport()`, which
+  now runs `dolt checkout <branch>` before importing/committing — instead
+  of always operating on whatever branch happened to be checked out
+  server-side (effectively always `main`). Older clients that omit `branch`
+  keep the previous behavior unchanged (backward compatible).
+- **Non-fast-forward detection (`from`) now compares against the head of
+  the requested branch**, not always `main` — `runDoltBranchHead()` was
+  already branch-aware; it just was never called with anything but the
+  default before.
+- Paired fix with **Deltix-Client v0.8.8**, which stopped hardcoding `main`
+  for `pull`/`push`/`fetch` on the client side and started sending the
+  project's actual bound branch. Both sides needed the fix: the client fix
+  alone would have made `push` send the right branch, but the server would
+  have kept silently ignoring it and importing onto `main` anyway.
+
+### Tests
+
+- New unit tests in `commit-import.service.test.ts` verify
+  `importCommits()` forwards the client-requested `branch` to the commit
+  runner (instead of relying on a hardcoded default) and that the
+  fast-forward check reads the head of that same branch. Full existing
+  unit (285 tests) and integration (231 tests, real Dolt binary + real
+  HTTP via Hono) suites re-run clean with no regressions.
+
 ## [0.9.1] - 2026-09-04
 
 **In plain terms:** any repository with a FULLTEXT search index on a table

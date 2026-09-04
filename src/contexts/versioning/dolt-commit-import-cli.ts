@@ -37,9 +37,22 @@ export const runDoltCommitImport: RunDoltCommitImport = async ({
   authorName,
   message,
   tables,
+  branch,
 }) => {
   const safeAuthor = sanitizeAuthorName(authorName);
   const authorFlag = `${safeAuthor} <${safeAuthor}@deltix.local>`;
+
+  // Check out the target branch before importing so the commit lands on the
+  // branch the client actually pushed from, instead of always defaulting to
+  // whatever branch happened to be checked out server-side. Skipped when the
+  // client omitted `branch` (older client) — the repo's already-checked-out
+  // branch is used as-is, mirroring previous behavior.
+  if (branch) {
+    const checkout = await $`dolt --data-dir ${doltPath} checkout ${branch}`.quiet().nothrow();
+    if (checkout.exitCode !== 0) {
+      throw new Error(`dolt checkout ${branch} failed: ${checkout.stderr.toString().trim()}`);
+    }
+  }
 
   // Recreate the schema, then reload every row. Extracted for cognitive
   // complexity reasons (lint caps the main function at 15).

@@ -34,6 +34,10 @@ export type RunDoltCommitImport = (params: {
   authorName: string;
   message: string;
   tables: ImportedTable[];
+  /** Branch to check out and commit onto before importing. Defaults to
+   * `main` in the CLI implementation when omitted (backward compatibility
+   * with pre-branch-aware clients). */
+  branch?: string;
 }) => Promise<string>;
 
 export type RunDoltBranchHead = (params: {
@@ -107,6 +111,7 @@ export class CommitImportService {
         authorName: commit.author,
         message: commit.message,
         tables: commit.tables,
+        branch,
       });
       lastCommitHash = commitHash;
     }
