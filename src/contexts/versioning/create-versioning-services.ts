@@ -53,7 +53,7 @@ export async function createVersioningServices(env: Env): Promise<VersioningServ
       env.DELTIX_DOLT_REPOS_ROOT_PATH,
     ),
     commitService: new CommitService(store, runDoltCommit),
-    commitImportService: new CommitImportService(store, runDoltCommitImport),
+    commitImportService: new CommitImportService(store, runDoltCommitImport, runDoltBranchHead),
     commitExportService: new CommitExportService(
       store,
       runDoltCommitExport,

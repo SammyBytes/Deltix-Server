@@ -9,6 +9,43 @@ Each entry starts with a **plain-language summary** (what changed, in
 everyday words) before any technical detail — written so someone outside
 engineering can understand what shipped and why it matters.
 
+## [0.9.0] - 2026-09-04
+
+**In plain terms:** Until now, when you pushed your saved work to a shared
+repository, the server did not check whether anyone else had pushed newer
+work in the meantime. That meant a push based on older data could quietly
+overwrite or orphan someone else's newer commits, with no warning at all —
+exactly the kind of silent data loss git protects you from. From now on, the
+server behaves like git: if the remote "main" branch has advanced beyond the
+version your push was based on, it refuses the push and tells you to pull
+first. `deltix push` then shows a clear message instead of silently moving
+ahead.
+
+### New
+
+- **Reject non-fast-forward pushes (mirrors git's default refusal).** The
+  `push-commits` endpoint now accepts an optional `from` — the remote head the
+  client last pulled from. Before importing any commit, the server compares
+  `from` against the current head of its `main` branch; if they don't match
+  (because another dev pushed in the meantime), it responds `409` with a
+  `non-fast-forward` code instead of importing the commits. This prevents a
+  stale-base push from overwriting or orphaning a newer commit on the remote
+  branch.
+- **Backwards-compatible protocol.** A client that does not send `from`
+  (older versions) is treated as before — the server skips the check, so
+  existing clients and the push path keep working unchanged.
+
+### Fixed
+
+- (None — this is a new safety guard, not a bug fix.)
+
+### Tests
+
+- Unit suite: 92 passing tests in the versioning context, including new
+  cases that a matching `from` is accepted, a mismatched `from` is rejected
+  with `NonFastForwardError` (and no commits are imported), and an absent
+  `from` is accepted for backwards compatibility.
+
 ## [0.8.9] - 2026-09-03
 
 **In plain terms:** production `deltix pull`/`deltix fetch` against a large,

@@ -6,6 +6,7 @@ import {
   CommitImportError,
   CommitImportService,
 } from '../../../src/contexts/versioning/commit-import.service';
+import { NonFastForwardError } from '../../../src/contexts/versioning/errors';
 import { LibsqlRepoStore } from '../../../src/contexts/versioning/libsql-repo-store';
 
 function createRepoStore() {
@@ -151,5 +152,77 @@ describe('versioning/CommitImportService', () => {
         { message: 'b', author: 'alice', tables: [] },
       ]),
     ).rejects.toThrow(CommitImportError);
+  });
+
+  it('accepts a fast-forward push when from matches the remote head', async () => {
+    const store = createRepoStore();
+    await store.init();
+    await store.create({
+      repoId: 'demo',
+      doltPath: join(tempDir, 'demo'),
+      createdAt: 1,
+      createdBy: 'seed',
+    });
+
+    const runImport = mock(async () => 'newhash');
+    const runBranchHead = mock(async ({ branch }: { branch: string }) =>
+      branch === 'main' ? 'basehead' : null,
+    );
+    const service = new CommitImportService(store, runImport, runBranchHead);
+
+    const result = await service.importCommits(
+      'demo',
+      [{ message: 'feat', author: 'alice', tables: [{ name: 't', data: 'id\n1' }] }],
+      'basehead',
+    );
+
+    expect(result.commitHash).toBe('newhash');
+    expect(runImport).toHaveBeenCalled();
+  });
+
+  it('rejects a non-fast-forward push when the remote head has advanced', async () => {
+    const store = createRepoStore();
+    await store.init();
+    await store.create({
+      repoId: 'demo',
+      doltPath: join(tempDir, 'demo'),
+      createdAt: 1,
+      createdBy: 'seed',
+    });
+
+    const runImport = mock(async () => 'newhash');
+    const runBranchHead = mock(async () => 'newerhead');
+    const service = new CommitImportService(store, runImport, runBranchHead);
+
+    await expect(
+      service.importCommits(
+        'demo',
+        [{ message: 'feat', author: 'alice', tables: [{ name: 't', data: 'id\n1' }] }],
+        'basehead',
+      ),
+    ).rejects.toThrow(NonFastForwardError);
+    expect(runImport).not.toHaveBeenCalled();
+  });
+
+  it('does not reject when from is absent (backwards-compatible client)', async () => {
+    const store = createRepoStore();
+    await store.init();
+    await store.create({
+      repoId: 'demo',
+      doltPath: join(tempDir, 'demo'),
+      createdAt: 1,
+      createdBy: 'seed',
+    });
+
+    const runImport = mock(async () => 'newhash');
+    const runBranchHead = mock(async () => 'newerhead');
+    const service = new CommitImportService(store, runImport, runBranchHead);
+
+    const result = await service.importCommits('demo', [
+      { message: 'feat', author: 'alice', tables: [{ name: 't', data: 'id\n1' }] },
+    ]);
+
+    expect(result.commitHash).toBe('newhash');
+    expect(runImport).toHaveBeenCalled();
   });
 });

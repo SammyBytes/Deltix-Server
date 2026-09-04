@@ -17,6 +17,7 @@ import {
   InvalidPaginationLimitError,
   InvalidRepoIdError,
   MergeConflictError,
+  NonFastForwardError,
   ProtectedBranchError,
   RepoAccessDeniedError,
   RepoAlreadyProvisionedError,
@@ -281,6 +282,25 @@ function handleSyncError(err: unknown, fallback: string) {
     return { body: { error: err.message }, status: 409 };
   }
   return { body: { error: fallback }, status: 500 };
+}
+
+function handleCommitImportError(err: unknown, repoId: string) {
+  if (err instanceof CommitImportError) {
+    return { body: { error: err.message }, status: 400 };
+  }
+  if (err instanceof NonFastForwardError) {
+    return {
+      body: {
+        error: err.message,
+        code: 'non-fast-forward',
+        base: err.base,
+        currentHead: err.currentHead,
+      },
+      status: 409,
+    };
+  }
+  logger.error({ err, repoId }, 'Failed to import commits');
+  return { body: { error: 'Failed to import commits' }, status: 500 };
 }
 
 export function createVersioningRouter(
@@ -658,6 +678,9 @@ export function createVersioningRouter(
 
     const pushCommitsBodySchema = z.object({
       commits: z.array(commitSchema).min(1).max(100),
+      // The server head the client last pulled from (its push base). When
+      // present, the server rejects a non-fast-forward push (remote advanced).
+      from: z.string().optional(),
     });
 
     app.post('/repos/:repoId/push-commits', async (c) => {
@@ -685,6 +708,7 @@ export function createVersioningRouter(
         const result = await commitImportService.importCommits(
           c.req.param('repoId'),
           parsed.data.commits,
+          parsed.data.from ?? null,
         );
         logger.info(
           {
@@ -697,11 +721,8 @@ export function createVersioningRouter(
         );
         return c.json({ commitHash: result.commitHash }, 201);
       } catch (err) {
-        if (err instanceof CommitImportError) {
-          return c.json({ error: err.message }, 400);
-        }
-        logger.error({ err, repoId: c.req.param('repoId') }, 'Failed to import commits');
-        return c.json({ error: 'Failed to import commits' }, 500);
+        const handled = handleCommitImportError(err, c.req.param('repoId'));
+        return c.json(handled.body, handled.status as 400 | 409 | 500);
       }
     });
   }

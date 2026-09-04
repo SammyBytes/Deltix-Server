@@ -6,6 +6,8 @@
  * This replaces the old file-transfer gRPC push with a structured
  * commit-based protocol over REST JSON.
  */
+
+import { NonFastForwardError } from './errors';
 import type { RepoStore } from './repo-store';
 
 export interface ImportedTable {
@@ -34,6 +36,14 @@ export type RunDoltCommitImport = (params: {
   tables: ImportedTable[];
 }) => Promise<string>;
 
+export type RunDoltBranchHead = (params: {
+  doltPath: string;
+  branch: string;
+}) => Promise<string | null>;
+
+/** Branch the server imports pushed commits onto (mirrors the client's default). */
+export const DEFAULT_IMPORT_BRANCH = 'main';
+
 export class CommitImportError extends Error {
   constructor(
     readonly command: string,
@@ -48,13 +58,24 @@ export class CommitImportService {
   constructor(
     private readonly store: RepoStore,
     private readonly runDoltCommitImport: RunDoltCommitImport,
+    private readonly runDoltBranchHead?: RunDoltBranchHead,
   ) {}
 
   /**
    * Imports a batch of commits into the server-side Dolt repo.
    * Returns the commit hash of the last imported commit.
+   *
+   * When `from` is provided (the server head the client last pulled) and a
+   * `runDoltBranchHead` reader is wired up, the push is rejected as
+   * non-fast-forward unless `from` matches the current remote head — mirroring
+   * git's refusal to overwrite/orphan a commit another dev has since pushed.
    */
-  async importCommits(repoId: string, commits: ImportedCommit[]): Promise<CommitImportResult> {
+  async importCommits(
+    repoId: string,
+    commits: ImportedCommit[],
+    from?: string | null,
+    branch = DEFAULT_IMPORT_BRANCH,
+  ): Promise<CommitImportResult> {
     const record = await this.store.get(repoId);
     if (!record) {
       throw new CommitImportError('lookup', `Repo "${repoId}" not found`);
@@ -62,6 +83,17 @@ export class CommitImportService {
 
     if (commits.length === 0) {
       throw new CommitImportError('validation', 'No commits to import');
+    }
+
+    if (from && this.runDoltBranchHead) {
+      const currentHead = await this.runDoltBranchHead({ doltPath: record.doltPath, branch });
+      if (currentHead && currentHead !== from) {
+        throw new NonFastForwardError(
+          'Remote rejected the push: the remote branch has advanced. Run `deltix pull` first, then push again.',
+          from,
+          currentHead,
+        );
+      }
     }
 
     let lastCommitHash = '';

@@ -94,6 +94,17 @@ export class RepoAccessDeniedError extends Error {
   }
 }
 
+export class NonFastForwardError extends Error {
+  constructor(
+    message: string,
+    readonly base: string,
+    readonly currentHead: string,
+  ) {
+    super(message);
+    this.name = 'NonFastForwardError';
+  }
+}
+
 export class MergeConflictError extends Error {
   constructor(
     message: string,
