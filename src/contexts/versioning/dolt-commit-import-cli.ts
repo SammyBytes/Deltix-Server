@@ -26,6 +26,13 @@ function sanitizeAuthorName(username: string): string {
 // sync-prefs layer, but we double-check here as defense-in-depth).
 const SAFE_TABLE_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
+/** True when a `dolt checkout <branch>` failure means the branch does not
+ * exist yet (dolt addresses branches like tablespecs), so we should create it
+ * from the current head — versus an unrelated error we must surface as-is. */
+export function isMissingBranchCheckoutError(stderr: string): boolean {
+  return stderr.includes('did not match any table');
+}
+
 function assertSafeTableName(name: string): void {
   if (!SAFE_TABLE_RE.test(name)) {
     throw new Error(`Refusing to import: table name "${name}" has an unexpected shape`);
@@ -50,7 +57,17 @@ export const runDoltCommitImport: RunDoltCommitImport = async ({
   if (branch) {
     const checkout = await $`dolt --data-dir ${doltPath} checkout ${branch}`.quiet().nothrow();
     if (checkout.exitCode !== 0) {
-      throw new Error(`dolt checkout ${branch} failed: ${checkout.stderr.toString().trim()}`);
+      // Git `push -u` semantics: the branch doesn't exist server-side yet
+      // (the client creates it locally first), so create it from the current
+      // head before importing. A missing branch is the only failure we heal;
+      // any other checkout error (e.g. uncommitted rows) is fatal.
+      if (!isMissingBranchCheckoutError(checkout.stderr.toString())) {
+        throw new Error(`dolt checkout ${branch} failed: ${checkout.stderr.toString().trim()}`);
+      }
+      const create = await $`dolt --data-dir ${doltPath} checkout -b ${branch}`.quiet().nothrow();
+      if (create.exitCode !== 0) {
+        throw new Error(`dolt checkout -b ${branch} failed: ${create.stderr.toString().trim()}`);
+      }
     }
   }
 

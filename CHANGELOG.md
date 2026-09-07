@@ -9,6 +9,41 @@ Each entry starts with a **plain-language summary** (what changed, in
 everyday words) before any technical detail — written so someone outside
 engineering can understand what shipped and why it matters.
 
+## [0.9.3] - 2026-09-07
+
+**In plain terms:** the previous release made `deltix push` put your work on
+the right branch, but it still expected that branch to already exist on the
+server. So the very first push of a brand-new branch — which git-style
+workflows now create locally first, as of Deltix-Client v0.8.14 — stalled
+and got rejected. Fixed: the server now behaves like git. If the branch you
+push to does not exist yet, it creates it starting from the current
+server state, then records your commits on it. The first push to a new
+branch always works now, on both sides of the sync.
+
+### Fixed
+- **`POST /repos/:repoId/push-commits` no longer rejects the first push of a
+  new branch.** In `runDoltCommitImport()` the initial `dolt checkout
+  <branch>` failed for a not-yet-existing branch (dolt addresses branches
+  like tablespecs: `error: tablespec 'x' did not match any table(s)`), and
+  the import aborted before any commit landed. It now distinguishes that
+  case (extracted as `isMissingBranchCheckoutError()`, exported for
+  testing) and heals it with `dolt checkout -b <branch>` — git `push -u`
+  semantics: the branch is created from the current remote head and the
+  pushed commits land on it. Any other checkout failure (e.g. uncommitted
+  rows on the server repo) remains fatal and surfaces as before.
+- Paired with **Deltix-Client v0.8.14**, which made branch creation
+  local-first: the client creates branches locally and publishes them via
+  push, so this branch-creation-on-push path is how the server becomes aware
+  of new branches.
+
+### Tests
+- New unit coverage for the `isMissingBranchCheckoutError()` predicate
+  (missing-branch stderr → true; unrelated stderr → false).
+- New real-dolt integration tests prove: a first push to a brand-new branch
+  creates it (with `*` marking it active) and the commit lands on it, and
+  that importing onto an already-existing branch is unchanged.
+- 289 server unit tests pass; `bun run lint` clean (no errors).
+
 ## [0.9.2] - 2026-09-04
 
 **In plain terms:** even after fixing the client so it remembers which
